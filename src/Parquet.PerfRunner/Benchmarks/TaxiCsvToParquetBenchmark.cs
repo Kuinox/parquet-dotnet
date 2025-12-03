@@ -1,7 +1,16 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Running;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Threading;
+using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
 using ParquetSharp;
@@ -10,35 +19,45 @@ using Column = ParquetSharp.Column;
 using ParquetReaderNet = Parquet.ParquetReader;
 using ParquetWriterNet = Parquet.ParquetWriter;
 using IOFile = System.IO.File;
+using ParquetSharpEncoding = ParquetSharp.Encoding;
 
 namespace Parquet.PerfRunner.Benchmarks;
 
-[MemoryDiagnoser]
-[MarkdownExporter]
-[ShortRunJob]
-public class TaxiCsvToParquetBenchmark
+public abstract class TaxiCsvBenchmarkBase : IConfigSource
 {
-    // Official NYC TLC parquet. The "tripdata" dataset is a single month; "tripdata-large" combines multiple months.
-    private const string BaseUrl = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
-    private static readonly IReadOnlyDictionary<string, string[]> DatasetFiles = new Dictionary<string, string[]>
+    protected static readonly string[] IntColumnNames = ["vendorid", "ratecodeid", "payment_type"];
+    protected static readonly bool KeepArtifacts = string.Equals(
+        Environment.GetEnvironmentVariable("PARQUET_PERF_KEEP_FILES"),
+        "1",
+        StringComparison.Ordinal);
+    protected static readonly ConcurrentDictionary<string, long> FileSizes = new();
+
+    protected TaxiCsvBenchmarkBase()
     {
-        { "tripdata", new[] { "yellow_tripdata_2024-01.parquet" } },
-        { "tripdata-large", new[] { "yellow_tripdata_2024-01.parquet", "yellow_tripdata_2024-02.parquet", "yellow_tripdata_2024-03.parquet" } }
-    };
+        Config = ManualConfig.Create(DefaultConfig.Instance)
+            .AddColumn(FileSizeColumn.Instance);
+    }
 
-    private int?[]? _vendorIds;
-    private int?[]? _rateCodes;
-    private double?[]? _passengerCounts;
-    private double?[]? _tripDistances;
-    private int?[]? _paymentTypes;
-    private double?[]? _fareAmounts;
-
-    private ParquetSchema? _parquetSchema;
-    private DataColumn[]? _parquetNetColumns;
-    private Column[]? _parquetSharpColumns;
+    public IConfig Config { get; }
 
     [Params("tripdata", "tripdata-large")]
     public string Dataset { get; set; } = "tripdata";
+
+    [Params(LogicalEncoding.RleDictionary, LogicalEncoding.DeltaBinaryPacked, LogicalEncoding.Plain)]
+    public LogicalEncoding Encoding { get; set; } = LogicalEncoding.RleDictionary;
+
+    protected int?[]? _vendorIds;
+    protected int?[]? _rateCodes;
+    protected double?[]? _passengerCounts;
+    protected double?[]? _tripDistances;
+    protected int?[]? _paymentTypes;
+    protected double?[]? _fareAmounts;
+
+    protected ParquetSchema? _parquetSchema;
+    protected DataColumn[]? _parquetNetColumns;
+    protected Column[]? _parquetSharpColumns;
+    protected ParquetOptions? _parquetOptions;
+    protected WriterProperties? _parquetSharpWriterProperties;
 
     [GlobalSetup]
     public async Task LoadDataset()
@@ -81,134 +100,86 @@ public class TaxiCsvToParquetBenchmark
             new Column<int?>("payment_type"),
             new Column<double?>("fare_amount")
         ];
+
+        _parquetOptions = CreateParquetOptions(Encoding);
+        _parquetSharpWriterProperties = CreateParquetSharpWriterProperties(Encoding);
+        AfterLoadDataset();
     }
 
-    [Benchmark(Description = "Parquet.Net -> MemoryStream")]
-    public async Task ParquetNet()
+    [IterationCleanup]
+    public void BaseIterationCleanup()
     {
-        using var output = new MemoryStream();
-        using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output);
-        using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
-
-        foreach (DataColumn column in _parquetNetColumns!)
-        {
-            await rowGroup.WriteColumnAsync(column);
-        }
+        OnIterationCleanup();
     }
 
-    [Benchmark(Description = "ParquetSharp -> MemoryStream")]
-    public void ParquetSharp()
+    protected virtual void OnIterationCleanup() { }
+
+    private static ParquetOptions CreateParquetOptions(LogicalEncoding encoding) =>
+        encoding switch
+        {
+            LogicalEncoding.RleDictionary => new ParquetOptions
+            {
+                UseDictionaryEncoding = true,
+                DictionaryEncodingThreshold = 1.0,
+                UseDeltaBinaryPackedEncoding = false
+            },
+            LogicalEncoding.DeltaBinaryPacked => new ParquetOptions
+            {
+                UseDictionaryEncoding = false,
+                UseDeltaBinaryPackedEncoding = true
+            },
+            LogicalEncoding.Plain => new ParquetOptions
+            {
+                UseDictionaryEncoding = false,
+                UseDeltaBinaryPackedEncoding = false
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(encoding), encoding, "Unknown logical encoding")
+        };
+
+    private static WriterProperties CreateParquetSharpWriterProperties(LogicalEncoding encoding)
     {
-        using var output = new MemoryStream();
-        using var managedOutput = new ManagedOutputStream(output);
-        using var writer = new ParquetFileWriter(managedOutput, _parquetSharpColumns!);
-        using RowGroupWriter rowGroup = writer.AppendRowGroup();
+        var builder = new WriterPropertiesBuilder()
+            .Compression(Compression.Snappy);
 
-        using (LogicalColumnWriter<int?> vendorWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+        switch (encoding)
         {
-            vendorWriter.WriteBatch(_vendorIds!);
+            case LogicalEncoding.RleDictionary:
+                builder.EnableDictionary();
+                builder.Encoding(ParquetSharpEncoding.Plain);
+                break;
+            case LogicalEncoding.DeltaBinaryPacked:
+                builder.DisableDictionary();
+                builder.Encoding(ParquetSharpEncoding.Plain);
+                foreach (string columnName in IntColumnNames)
+                {
+                    builder.Encoding(columnName, ParquetSharpEncoding.DeltaBinaryPacked);
+                }
+
+                break;
+            case LogicalEncoding.Plain:
+                builder.DisableDictionary();
+                builder.Encoding(ParquetSharpEncoding.Plain);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(encoding), encoding, "Unknown logical encoding");
         }
 
-        using (LogicalColumnWriter<int?> rateCodeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
-        {
-            rateCodeWriter.WriteBatch(_rateCodes!);
-        }
-
-        using (LogicalColumnWriter<double?> passengerCountWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-        {
-            passengerCountWriter.WriteBatch(_passengerCounts!);
-        }
-
-        using (LogicalColumnWriter<double?> tripDistanceWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-        {
-            tripDistanceWriter.WriteBatch(_tripDistances!);
-        }
-
-        using (LogicalColumnWriter<int?> paymentTypeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
-        {
-            paymentTypeWriter.WriteBatch(_paymentTypes!);
-        }
-
-        using (LogicalColumnWriter<double?> fareWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-        {
-            fareWriter.WriteBatch(_fareAmounts!);
-        }
-
-        writer.Close();
+        return builder.Build();
     }
 
-    [Benchmark(Description = "Parquet.Net -> Disk")]
-    public async Task ParquetNetToDisk()
+    protected virtual void AfterLoadDataset()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetnet-{Guid.NewGuid():N}.parquet");
-        try
-        {
-            await using FileStream output = IOFile.Create(path);
-            using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output);
-            using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
-
-            foreach (DataColumn column in _parquetNetColumns!)
-            {
-                await rowGroup.WriteColumnAsync(column);
-            }
-        }
-        finally
-        {
-            TryDelete(path);
-        }
-    }
-
-    [Benchmark(Description = "ParquetSharp -> Disk")]
-    public void ParquetSharpToDisk()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetsharp-{Guid.NewGuid():N}.parquet");
-        try
-        {
-            using FileStream output = IOFile.Create(path);
-            using var managedOutput = new ManagedOutputStream(output);
-            using var writer = new ParquetFileWriter(managedOutput, _parquetSharpColumns!);
-            using RowGroupWriter rowGroup = writer.AppendRowGroup();
-
-            using (LogicalColumnWriter<int?> vendorWriter = rowGroup.NextColumn().LogicalWriter<int?>())
-            {
-                vendorWriter.WriteBatch(_vendorIds!);
-            }
-
-            using (LogicalColumnWriter<int?> rateCodeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
-            {
-                rateCodeWriter.WriteBatch(_rateCodes!);
-            }
-
-            using (LogicalColumnWriter<double?> passengerCountWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-            {
-                passengerCountWriter.WriteBatch(_passengerCounts!);
-            }
-
-            using (LogicalColumnWriter<double?> tripDistanceWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-            {
-                tripDistanceWriter.WriteBatch(_tripDistances!);
-            }
-
-            using (LogicalColumnWriter<int?> paymentTypeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
-            {
-                paymentTypeWriter.WriteBatch(_paymentTypes!);
-            }
-
-            using (LogicalColumnWriter<double?> fareWriter = rowGroup.NextColumn().LogicalWriter<double?>())
-            {
-                fareWriter.WriteBatch(_fareAmounts!);
-            }
-
-            writer.Close();
-        }
-        finally
-        {
-            TryDelete(path);
-        }
     }
 
     private static string GetDataDirectory()
     {
+        string? overrideDir = Environment.GetEnvironmentVariable("PARQUET_PERF_DATA_DIR");
+        if (!string.IsNullOrWhiteSpace(overrideDir))
+        {
+            Directory.CreateDirectory(overrideDir);
+            return overrideDir;
+        }
+
         return Path.Combine(AppContext.BaseDirectory, "Data");
     }
 
@@ -332,7 +303,7 @@ public class TaxiCsvToParquetBenchmark
             _ => throw new InvalidOperationException($"Unsupported numeric type: {data.GetType()}")
         };
 
-    private static void TryDelete(string path)
+    protected static void TryDelete(string path)
     {
         try
         {
@@ -345,6 +316,443 @@ public class TaxiCsvToParquetBenchmark
         {
             // best effort cleanup
         }
+    }
+
+    protected static void RecordFileSize(string method, LogicalEncoding encoding, long length)
+    {
+        try
+        {
+            string key = BuildKey(method, encoding);
+            FileSizes[key] = length;
+        }
+        catch
+        {
+            // ignore size recording failures
+        }
+    }
+
+    protected static string BuildKey(string method, LogicalEncoding encoding) => $"{method}|{encoding}";
+
+    private sealed class FileSizeColumn : IColumn
+    {
+        public static readonly IColumn Instance = new FileSizeColumn();
+
+        public string Id => "FileSizeBytes";
+        public string ColumnName => "FileSizeBytes";
+        public bool IsNumeric => true;
+        public UnitType UnitType => UnitType.Size;
+        public ColumnCategory Category => ColumnCategory.Custom;
+        public int PriorityInCategory => 0;
+        public bool AlwaysShow => true;
+        public bool IsDefault(Summary summary, BenchmarkCase benchmarkCase) => false;
+        public bool IsAvailable(Summary summary) => true;
+        public string Legend => "Size of the last produced parquet payload (bytes)";
+
+        public string GetValue(Summary summary, BenchmarkCase benchmarkCase)
+            => GetValue(summary, benchmarkCase, SummaryStyle.Default);
+
+        public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)
+        {
+            string method = benchmarkCase.Descriptor.WorkloadMethod.Name;
+            var encoding = (LogicalEncoding)benchmarkCase.Parameters[nameof(TaxiCsvBenchmarkBase.Encoding)];
+            string key = BuildKey(method, encoding);
+
+            return FileSizes.TryGetValue(key, out long bytes)
+                ? bytes.ToString()
+                : "?";
+        }
+    }
+
+    // Official NYC TLC parquet. The "tripdata" dataset is a single month; "tripdata-large" combines multiple months.
+    private const string BaseUrl = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
+    private static readonly IReadOnlyDictionary<string, string[]> DatasetFiles = new Dictionary<string, string[]>
+    {
+        { "tripdata", new[] { "yellow_tripdata_2024-01.parquet" } },
+        { "tripdata-large", new[] { "yellow_tripdata_2024-01.parquet", "yellow_tripdata_2024-02.parquet", "yellow_tripdata_2024-03.parquet" } }
+    };
+}
+
+public class TaxiParquetNetVsSharpBenchmark : TaxiCsvBenchmarkBase
+{
+    private long? _netMem;
+    private long? _sharpMem;
+    private long? _netDisk;
+    private long? _sharpDisk;
+    private string? _netDiskPath;
+    private string? _sharpDiskPath;
+
+    [Benchmark(Description = "Parquet.Net -> MemoryStream")]
+    public async Task ParquetNetMemory()
+    {
+        using var output = new MemoryStream();
+        using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output, _parquetOptions);
+        using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
+
+        foreach (DataColumn column in _parquetNetColumns!)
+        {
+            await rowGroup.WriteColumnAsync(column);
+        }
+
+        _netMem = output.Length;
+    }
+
+    [Benchmark(Description = "ParquetSharp -> MemoryStream")]
+    public void ParquetSharpMemory()
+    {
+        using var output = new MemoryStream();
+        using var managedOutput = new ManagedOutputStream(output);
+        using var writer = new ParquetFileWriter(managedOutput, _parquetSharpColumns!, _parquetSharpWriterProperties!, null);
+        using RowGroupWriter rowGroup = writer.AppendRowGroup();
+
+        using (LogicalColumnWriter<int?> vendorWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+        {
+            vendorWriter.WriteBatch(_vendorIds!);
+        }
+
+        using (LogicalColumnWriter<int?> rateCodeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+        {
+            rateCodeWriter.WriteBatch(_rateCodes!);
+        }
+
+        using (LogicalColumnWriter<double?> passengerCountWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+        {
+            passengerCountWriter.WriteBatch(_passengerCounts!);
+        }
+
+        using (LogicalColumnWriter<double?> tripDistanceWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+        {
+            tripDistanceWriter.WriteBatch(_tripDistances!);
+        }
+
+        using (LogicalColumnWriter<int?> paymentTypeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+        {
+            paymentTypeWriter.WriteBatch(_paymentTypes!);
+        }
+
+        using (LogicalColumnWriter<double?> fareWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+        {
+            fareWriter.WriteBatch(_fareAmounts!);
+        }
+
+        writer.Close();
+        _sharpMem = output.Length;
+    }
+
+    [Benchmark(Description = "Parquet.Net -> Disk")]
+    public async Task ParquetNetDisk()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetnet-{Guid.NewGuid():N}.parquet");
+        try
+        {
+            await using FileStream output = IOFile.Create(path);
+            using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output, _parquetOptions);
+            using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
+
+            foreach (DataColumn column in _parquetNetColumns!)
+            {
+                await rowGroup.WriteColumnAsync(column);
+            }
+
+            _netDisk = new FileInfo(path).Length;
+            _netDiskPath = path;
+        }
+        catch
+        {
+            TryDelete(path);
+            throw;
+        }
+    }
+
+    [Benchmark(Description = "ParquetSharp -> Disk")]
+    public void ParquetSharpDisk()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetsharp-{Guid.NewGuid():N}.parquet");
+        try
+        {
+            using FileStream output = IOFile.Create(path);
+            using var managedOutput = new ManagedOutputStream(output);
+            using var writer = new ParquetFileWriter(managedOutput, _parquetSharpColumns!, _parquetSharpWriterProperties!, null);
+            using RowGroupWriter rowGroup = writer.AppendRowGroup();
+
+            using (LogicalColumnWriter<int?> vendorWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+            {
+                vendorWriter.WriteBatch(_vendorIds!);
+            }
+
+            using (LogicalColumnWriter<int?> rateCodeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+            {
+                rateCodeWriter.WriteBatch(_rateCodes!);
+            }
+
+            using (LogicalColumnWriter<double?> passengerCountWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+            {
+                passengerCountWriter.WriteBatch(_passengerCounts!);
+            }
+
+            using (LogicalColumnWriter<double?> tripDistanceWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+            {
+                tripDistanceWriter.WriteBatch(_tripDistances!);
+            }
+
+            using (LogicalColumnWriter<int?> paymentTypeWriter = rowGroup.NextColumn().LogicalWriter<int?>())
+            {
+                paymentTypeWriter.WriteBatch(_paymentTypes!);
+            }
+
+            using (LogicalColumnWriter<double?> fareWriter = rowGroup.NextColumn().LogicalWriter<double?>())
+            {
+                fareWriter.WriteBatch(_fareAmounts!);
+            }
+
+            writer.Close();
+            _sharpDisk = new FileInfo(path).Length;
+            _sharpDiskPath = path;
+        }
+        catch
+        {
+            TryDelete(path);
+            throw;
+        }
+    }
+
+    protected override void OnIterationCleanup()
+    {
+        if (_netMem.HasValue) RecordFileSize(nameof(ParquetNetMemory), Encoding, _netMem.Value);
+        if (_sharpMem.HasValue) RecordFileSize(nameof(ParquetSharpMemory), Encoding, _sharpMem.Value);
+        if (_netDisk.HasValue) RecordFileSize(nameof(ParquetNetDisk), Encoding, _netDisk.Value);
+        if (_sharpDisk.HasValue) RecordFileSize(nameof(ParquetSharpDisk), Encoding, _sharpDisk.Value);
+
+        if (_netDiskPath != null)
+        {
+            if (KeepArtifacts) Console.WriteLine($"ParquetNetDisk file kept at: {_netDiskPath}");
+            else TryDelete(_netDiskPath);
+        }
+
+        if (_sharpDiskPath != null)
+        {
+            if (KeepArtifacts) Console.WriteLine($"ParquetSharpDisk file kept at: {_sharpDiskPath}");
+            else TryDelete(_sharpDiskPath);
+        }
+
+        _netMem = _sharpMem = _netDisk = _sharpDisk = null;
+        _netDiskPath = _sharpDiskPath = null;
+    }
+}
+
+[MemoryDiagnoser]
+[MarkdownExporter]
+[ShortRunJob]
+public class TaxiParquetNetNugetBenchmark : TaxiCsvBenchmarkBase
+{
+    private object? _nugetSchema;
+    private object[]? _nugetColumns;
+    private MethodInfo? _nugetCreateAsync;
+    private Assembly? _nugetAssembly;
+    private Type? _nugetRowGroupWriterType;
+
+    private long? _localMem;
+    private long? _nugetMem;
+    private long? _localDisk;
+    private long? _nugetDisk;
+    private string? _localDiskPath;
+    private string? _nugetDiskPath;
+
+    protected override void AfterLoadDataset()
+    {
+        string dllPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget", "packages", "parquet.net", "4.24.0", "lib", "net8.0", "Parquet.dll");
+
+        _nugetAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(dllPath);
+
+        Type dataFieldType = _nugetAssembly.GetType("Parquet.Data.DataField")!;
+        Type schemaType = _nugetAssembly.GetType("Parquet.Schema.ParquetSchema")!;
+        Type dataColumnType = _nugetAssembly.GetType("Parquet.Data.DataColumn")!;
+        Type writerType = _nugetAssembly.GetType("Parquet.ParquetWriter")!;
+        _nugetRowGroupWriterType = _nugetAssembly.GetType("Parquet.ParquetRowGroupWriter")!;
+
+        object CreateDataField(string name, Type clrType) =>
+            Activator.CreateInstance(dataFieldType, new object?[] { name, clrType, null, null, null })!;
+
+        object[] fields =
+        [
+            CreateDataField("vendorid", typeof(int?)),
+            CreateDataField("ratecodeid", typeof(int?)),
+            CreateDataField("passenger_count", typeof(double?)),
+            CreateDataField("trip_distance", typeof(double?)),
+            CreateDataField("payment_type", typeof(int?)),
+            CreateDataField("fare_amount", typeof(double?))
+        ];
+
+        _nugetSchema = Activator.CreateInstance(schemaType, new object?[] { fields })!;
+
+        _nugetColumns =
+        [
+            Activator.CreateInstance(dataColumnType, fields[0], _vendorIds)!,
+            Activator.CreateInstance(dataColumnType, fields[1], _rateCodes)!,
+            Activator.CreateInstance(dataColumnType, fields[2], _passengerCounts)!,
+            Activator.CreateInstance(dataColumnType, fields[3], _tripDistances)!,
+            Activator.CreateInstance(dataColumnType, fields[4], _paymentTypes)!,
+            Activator.CreateInstance(dataColumnType, fields[5], _fareAmounts)!
+        ];
+
+        var createCandidates = new List<Type?>()
+        {
+            schemaType,
+            typeof(Stream),
+            _nugetAssembly.GetType("Parquet.ParquetOptions"),
+            typeof(bool),
+            typeof(CancellationToken)
+        };
+
+        _nugetCreateAsync = writerType.GetMethod("CreateAsync", createCandidates.Where(t => t != null).Cast<Type>().ToArray())
+            ?? writerType.GetMethod("CreateAsync", new[] { schemaType, typeof(Stream) });
+    }
+
+    [Benchmark(Description = "Parquet.Net Local -> MemoryStream")]
+    public async Task ParquetLocalMemory()
+    {
+        using var output = new MemoryStream();
+        using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output, _parquetOptions);
+        using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
+
+        foreach (DataColumn column in _parquetNetColumns!)
+        {
+            await rowGroup.WriteColumnAsync(column);
+        }
+
+        _localMem = output.Length;
+    }
+
+    [Benchmark(Description = "Parquet.Net NuGet -> MemoryStream")]
+    public async Task ParquetNugetMemory()
+    {
+        using var output = new MemoryStream();
+        dynamic writer = await CreateNugetWriterAsync(output);
+        dynamic rowGroup = writer.CreateRowGroup();
+
+        foreach (dynamic column in _nugetColumns!)
+        {
+            await rowGroup.WriteColumnAsync(column);
+        }
+
+        DisposeNuget(writer, rowGroup);
+        _nugetMem = output.Length;
+    }
+
+    [Benchmark(Description = "Parquet.Net Local -> Disk")]
+    public async Task ParquetLocalDisk()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetnetlocal-{Guid.NewGuid():N}.parquet");
+        try
+        {
+            await using FileStream output = IOFile.Create(path);
+            using ParquetWriterNet writer = await ParquetWriterNet.CreateAsync(_parquetSchema!, output, _parquetOptions);
+            using ParquetRowGroupWriter rowGroup = writer.CreateRowGroup();
+
+            foreach (DataColumn column in _parquetNetColumns!)
+            {
+                await rowGroup.WriteColumnAsync(column);
+            }
+
+            _localDisk = new FileInfo(path).Length;
+            _localDiskPath = path;
+        }
+        catch
+        {
+            TryDelete(path);
+            throw;
+        }
+    }
+
+    [Benchmark(Description = "Parquet.Net NuGet -> Disk")]
+    public async Task ParquetNugetDisk()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"taxi-parquetnetnuget-{Guid.NewGuid():N}.parquet");
+        try
+        {
+            await using FileStream output = IOFile.Create(path);
+            dynamic writer = await CreateNugetWriterAsync(output);
+            dynamic rowGroup = writer.CreateRowGroup();
+
+            foreach (dynamic column in _nugetColumns!)
+            {
+                await rowGroup.WriteColumnAsync(column);
+            }
+
+            DisposeNuget(writer, rowGroup);
+            _nugetDisk = new FileInfo(path).Length;
+            _nugetDiskPath = path;
+        }
+        catch
+        {
+            TryDelete(path);
+            throw;
+        }
+    }
+
+    private async Task<dynamic> CreateNugetWriterAsync(Stream output)
+    {
+        if (_nugetCreateAsync == null || _nugetSchema == null)
+        {
+            throw new InvalidOperationException("NuGet schema not initialized");
+        }
+
+        object? taskObj = _nugetCreateAsync.Invoke(null, _nugetCreateAsync.GetParameters().Length == 5
+            ? new object?[] { _nugetSchema, output, null, false, CancellationToken.None }
+            : new object?[] { _nugetSchema, output });
+
+        if (taskObj is not Task writerTask)
+        {
+            throw new InvalidOperationException("Unexpected writer task type for NuGet Parquet");
+        }
+
+        await writerTask.ConfigureAwait(false);
+        dynamic writer = ((dynamic)writerTask).Result;
+        return writer;
+    }
+
+    private void DisposeNuget(dynamic writer, dynamic rowGroup)
+    {
+        try
+        {
+            rowGroup?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            writer?.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    protected override void OnIterationCleanup()
+    {
+        if (_localMem.HasValue) RecordFileSize(nameof(ParquetLocalMemory), Encoding, _localMem.Value);
+        if (_nugetMem.HasValue) RecordFileSize(nameof(ParquetNugetMemory), Encoding, _nugetMem.Value);
+        if (_localDisk.HasValue) RecordFileSize(nameof(ParquetLocalDisk), Encoding, _localDisk.Value);
+        if (_nugetDisk.HasValue) RecordFileSize(nameof(ParquetNugetDisk), Encoding, _nugetDisk.Value);
+
+        if (_localDiskPath != null)
+        {
+            if (KeepArtifacts) Console.WriteLine($"ParquetLocalDisk file kept at: {_localDiskPath}");
+            else TryDelete(_localDiskPath);
+        }
+
+        if (_nugetDiskPath != null)
+        {
+            if (KeepArtifacts) Console.WriteLine($"ParquetNugetDisk file kept at: {_nugetDiskPath}");
+            else TryDelete(_nugetDiskPath);
+        }
+
+        _localMem = _nugetMem = _localDisk = _nugetDisk = null;
+        _localDiskPath = _nugetDiskPath = null;
     }
 }
 
@@ -366,4 +774,11 @@ internal readonly struct TaxiColumns
     public double?[] TripDistances { get; }
     public int?[] PaymentTypes { get; }
     public double?[] FareAmounts { get; }
+}
+
+public enum LogicalEncoding
+{
+    Plain,
+    RleDictionary,
+    DeltaBinaryPacked
 }

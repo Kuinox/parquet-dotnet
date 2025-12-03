@@ -1,21 +1,34 @@
-﻿// for performance tests only
+// for performance tests only
 
 using BenchmarkDotNet.Running;
 using Parquet;
 using Parquet.PerfRunner.Benchmarks;
 
-if(args.Length == 1) {
-    switch(args[0]) {
+if (args.Length == 0)
+{
+    await new DataTypes().NullableInts();
+    return;
+}
+
+if (args.Length == 1)
+{
+    switch (args[0])
+    {
         case "write":
             BenchmarkRunner.Run<WriteBenchmark>();
-            break;
+            return;
         case "progression":
             VersionedBenchmark.Run();
-            break;
+            return;
         case "taxi":
-            BenchmarkRunner.Run<TaxiCsvToParquetBenchmark>();
-            break;
+            BenchmarkRunner.Run(new[]
+            {
+                typeof(TaxiParquetNetVsSharpBenchmark),
+                typeof(TaxiParquetNetNugetBenchmark)
+            });
+            return;
     }
-} else {
-    await new DataTypes().NullableInts();
 }
+
+// fall back to full BenchmarkSwitcher to honor filters/arguments
+BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
