@@ -32,7 +32,7 @@ public class SelfComparisonBenchmark {
     ParquetOptions _options = null!;
     [GlobalSetup]
     public async Task LoadDatasetAsync() {
-        _dataset = await TaxiDatasetLoader.Instance.LoadAsync(Dataset);
+        _dataset = await TaxiDatasetLoader.LoadAsync(Dataset);
         _schema = TaxiSchema.Full(_dataset);
         _options = LogicalEncoding.CreateOptions();
     }

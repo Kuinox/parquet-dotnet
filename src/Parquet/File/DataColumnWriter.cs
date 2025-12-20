@@ -114,7 +114,7 @@ class DataColumnWriter {
 
         // dictionary page
         if(pc.HasDictionary) {
-            PageHeader ph = _footer.CreateDictionaryPage(pc.Dictionary!.Length);
+            PageHeader ph = ThriftFooter.CreateDictionaryPage(pc.Dictionary!.Length);
             using MemoryStream ms = _rmsMgr.GetStream();
             ParquetPlainEncoder.Encode(pc.Dictionary, 0, pc.Dictionary.Length,
                    tse,
@@ -131,7 +131,7 @@ class DataColumnWriter {
             bool deltaEncode = column.IsDeltaEncodable && _options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
 
             // data page Num_values also does include NULLs
-            PageHeader ph = _footer.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode);
+            PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode);
             if(pc.HasRepetitionLevels) {
                 WriteLevels(ms, pc.RepetitionLevels!, pc.RepetitionLevels!.Length, column.Field.MaxRepetitionLevel);
             }

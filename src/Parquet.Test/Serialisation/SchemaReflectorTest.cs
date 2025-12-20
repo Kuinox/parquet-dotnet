@@ -688,7 +688,7 @@ namespace Parquet.Test.Serialisation {
         public class ReadOnlyProperty {
             public int Id { get; set; }
 
-            public int ReadOnly => 42;
+            public static int ReadOnly => 42;
         }
 
         [Fact]

@@ -124,7 +124,7 @@ namespace Parquet.Schema {
         internal bool IsAtomicFieldOrCollectionItem =>
             IsAtomic || (this is ListField lf && lf.Item.IsAtomic);
 
-        internal IReadOnlyCollection<Field> NextDotPropertyPath(IReadOnlyCollection<Field> path) {
+        internal static IReadOnlyCollection<Field> NextDotPropertyPath(IReadOnlyCollection<Field> path) {
             if(path.Count == 0)
                 return Array.Empty<Field>();
 

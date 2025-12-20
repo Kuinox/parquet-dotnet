@@ -8,7 +8,7 @@ using System;
 
 namespace Parquet.Test.Serialisation {
     public class InheritedPropertiesTest : TestBase {
-        private InheritedClass[] GenerateRecordsToSerialize() {
+        private static InheritedClass[] GenerateRecordsToSerialize() {
             InheritedClass record = new() {
                 BasePropertyLevel2 = "0",
                 BaseProperty = "A",

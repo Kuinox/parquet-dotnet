@@ -97,7 +97,7 @@ namespace Parquet.Test.Reader {
             }
         }
 
-        private object? ChangeType(object? v, Type t) {
+        private static object? ChangeType(object? v, Type t) {
             if(v == null)
                 return null;
             if(v.GetType() == t)

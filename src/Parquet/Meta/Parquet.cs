@@ -436,7 +436,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class StringType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -457,7 +457,7 @@ namespace Parquet.Meta {
 
     public class UUIDType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -478,7 +478,7 @@ namespace Parquet.Meta {
 
     public class MapType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -499,7 +499,7 @@ namespace Parquet.Meta {
 
     public class ListType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -520,7 +520,7 @@ namespace Parquet.Meta {
 
     public class EnumType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -541,7 +541,7 @@ namespace Parquet.Meta {
 
     public class DateType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -562,7 +562,7 @@ namespace Parquet.Meta {
 
     public class Float16Type {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -586,7 +586,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class NullType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -651,7 +651,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class MilliSeconds {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -672,7 +672,7 @@ namespace Parquet.Meta {
 
     public class MicroSeconds {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -693,7 +693,7 @@ namespace Parquet.Meta {
 
     public class NanoSeconds {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -726,17 +726,17 @@ namespace Parquet.Meta {
             // 1: MILLIS, id
             if(MILLIS != null) {
                 proto.BeginInlineStruct(1);
-                MILLIS.Write(proto);
+                MilliSeconds.Write(proto);
             }
             // 2: MICROS, id
             if(MICROS != null) {
                 proto.BeginInlineStruct(2);
-                MICROS.Write(proto);
+                MicroSeconds.Write(proto);
             }
             // 3: NANOS, id
             if(NANOS != null) {
                 proto.BeginInlineStruct(3);
-                NANOS.Write(proto);
+                NanoSeconds.Write(proto);
             }
 
             proto.StructEnd();
@@ -896,7 +896,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class JsonType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -920,7 +920,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class BsonType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -944,7 +944,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class VariantType {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -1004,22 +1004,22 @@ namespace Parquet.Meta {
             // 1: STRING, id
             if(STRING != null) {
                 proto.BeginInlineStruct(1);
-                STRING.Write(proto);
+                StringType.Write(proto);
             }
             // 2: MAP, id
             if(MAP != null) {
                 proto.BeginInlineStruct(2);
-                MAP.Write(proto);
+                MapType.Write(proto);
             }
             // 3: LIST, id
             if(LIST != null) {
                 proto.BeginInlineStruct(3);
-                LIST.Write(proto);
+                ListType.Write(proto);
             }
             // 4: ENUM, id
             if(ENUM != null) {
                 proto.BeginInlineStruct(4);
-                ENUM.Write(proto);
+                EnumType.Write(proto);
             }
             // 5: DECIMAL, id
             if(DECIMAL != null) {
@@ -1029,7 +1029,7 @@ namespace Parquet.Meta {
             // 6: DATE, id
             if(DATE != null) {
                 proto.BeginInlineStruct(6);
-                DATE.Write(proto);
+                DateType.Write(proto);
             }
             // 7: TIME, id
             if(TIME != null) {
@@ -1049,32 +1049,32 @@ namespace Parquet.Meta {
             // 11: UNKNOWN, id
             if(UNKNOWN != null) {
                 proto.BeginInlineStruct(11);
-                UNKNOWN.Write(proto);
+                NullType.Write(proto);
             }
             // 12: JSON, id
             if(JSON != null) {
                 proto.BeginInlineStruct(12);
-                JSON.Write(proto);
+                JsonType.Write(proto);
             }
             // 13: BSON, id
             if(BSON != null) {
                 proto.BeginInlineStruct(13);
-                BSON.Write(proto);
+                BsonType.Write(proto);
             }
             // 14: UUID, id
             if(UUID != null) {
                 proto.BeginInlineStruct(14);
-                UUID.Write(proto);
+                UUIDType.Write(proto);
             }
             // 15: FLOAT16, id
             if(FLOAT16 != null) {
                 proto.BeginInlineStruct(15);
-                FLOAT16.Write(proto);
+                Float16Type.Write(proto);
             }
             // 16: VARIANT, id
             if(VARIANT != null) {
                 proto.BeginInlineStruct(16);
-                VARIANT.Write(proto);
+                VariantType.Write(proto);
             }
 
             proto.StructEnd();
@@ -1365,7 +1365,7 @@ namespace Parquet.Meta {
 
     public class IndexPageHeader {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -1560,7 +1560,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class SplitBlockAlgorithm {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -1595,7 +1595,7 @@ namespace Parquet.Meta {
             // 1: BLOCK, id
             if(BLOCK != null) {
                 proto.BeginInlineStruct(1);
-                BLOCK.Write(proto);
+                SplitBlockAlgorithm.Write(proto);
             }
 
             proto.StructEnd();
@@ -1624,7 +1624,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class XxHash {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -1659,7 +1659,7 @@ namespace Parquet.Meta {
             // 1: XXHASH, id
             if(XXHASH != null) {
                 proto.BeginInlineStruct(1);
-                XXHASH.Write(proto);
+                XxHash.Write(proto);
             }
 
             proto.StructEnd();
@@ -1688,7 +1688,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class Uncompressed {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -1717,7 +1717,7 @@ namespace Parquet.Meta {
             // 1: UNCOMPRESSED, id
             if(UNCOMPRESSED != null) {
                 proto.BeginInlineStruct(1);
-                UNCOMPRESSED.Write(proto);
+                Uncompressed.Write(proto);
             }
 
             proto.StructEnd();
@@ -1862,7 +1862,7 @@ namespace Parquet.Meta {
             // 6: IndexPageHeader, id
             if(IndexPageHeader != null) {
                 proto.BeginInlineStruct(6);
-                IndexPageHeader.Write(proto);
+                Meta.IndexPageHeader.Write(proto);
             }
             // 7: DictionaryPageHeader, id
             if(DictionaryPageHeader != null) {
@@ -2302,7 +2302,7 @@ namespace Parquet.Meta {
 
     public class EncryptionWithFooterKey {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -2385,7 +2385,7 @@ namespace Parquet.Meta {
             // 1: ENCRYPTIONWITHFOOTERKEY, id
             if(ENCRYPTIONWITHFOOTERKEY != null) {
                 proto.BeginInlineStruct(1);
-                ENCRYPTIONWITHFOOTERKEY.Write(proto);
+                EncryptionWithFooterKey.Write(proto);
             }
             // 2: ENCRYPTIONWITHCOLUMNKEY, id
             if(ENCRYPTIONWITHCOLUMNKEY != null) {
@@ -2667,7 +2667,7 @@ namespace Parquet.Meta {
     /// </summary>
     public class TypeDefinedOrder {
 
-        internal void Write(ThriftCompactProtocolWriter proto) {
+        internal static void Write(ThriftCompactProtocolWriter proto) {
             proto.WriteEmptyStruct();
         }
 
@@ -2702,7 +2702,7 @@ namespace Parquet.Meta {
             // 1: TYPEORDER, id
             if(TYPEORDER != null) {
                 proto.BeginInlineStruct(1);
-                TYPEORDER.Write(proto);
+                TypeDefinedOrder.Write(proto);
             }
 
             proto.StructEnd();

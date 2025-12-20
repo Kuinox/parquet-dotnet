@@ -20,7 +20,7 @@ namespace Parquet.Test {
     public class DocTest {
 
         //[Fact]
-        public async Task Write3() {
+        public static async Task Write3() {
             var schema = new ParquetSchema(
                 new DataField<DateTime>("Timestamp"),
                 new DataField<string>("EventName"),
@@ -85,7 +85,7 @@ namespace Parquet.Test {
     }
 
     class DocRef {
-        public async Task ReadIntro() {
+        public static async Task ReadIntro() {
             // open file stream
             using(Stream fileStream = System.IO.File.OpenRead("c:\\test.parquet")) {
                 // open parquet file reader
@@ -117,7 +117,7 @@ namespace Parquet.Test {
             }
         }
 
-        public async Task WriteIntro() {
+        public static async Task WriteIntro() {
             // create file schema
             var schema = new ParquetSchema(
                 new DataField<int>("id"),
@@ -145,7 +145,7 @@ namespace Parquet.Test {
             }
         }
 
-        public async Task AppendDemo() {
+        public static async Task AppendDemo() {
             //write a file with a single row group
             var schema = new ParquetSchema(new DataField<int>("id"));
             var ms = new MemoryStream();
@@ -182,7 +182,7 @@ namespace Parquet.Test {
             }
         }
 
-        public async Task CustomMetadata() {
+        public static async Task CustomMetadata() {
             var ms = new MemoryStream();
             var schema = new ParquetSchema(new DataField<int>("id"));
 

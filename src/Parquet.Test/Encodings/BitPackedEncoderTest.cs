@@ -9,7 +9,7 @@ namespace Parquet.Test.Encodings {
         const string Binary0to7WithBitWidth3LE = "10001000 11000110 11111010";
         const string Binary0to7WithBitWidth3BE = "00000101 00111001 01110111";
 
-        private byte[] BytesFromBinaryString(string s) {
+        private static byte[] BytesFromBinaryString(string s) {
             return s.Split(' ').Select(s => Convert.ToByte(s, 2)).ToArray();
         }
 

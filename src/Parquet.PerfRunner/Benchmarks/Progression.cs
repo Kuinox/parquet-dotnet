@@ -137,7 +137,7 @@ namespace Parquet.PerfRunner.Benchmarks {
             return ms;
         }
 
-        private async Task Run(ParquetSchema schema, DataColumn c) {
+        private static async Task Run(ParquetSchema schema, DataColumn c) {
             using(ParquetWriter writer = await ParquetWriter.CreateAsync(schema, new MemoryStream())) {
                 writer.CompressionMethod = CompressionMethod.None;
                 // create a new row group in the file
@@ -147,7 +147,7 @@ namespace Parquet.PerfRunner.Benchmarks {
             }
         }
 
-        private async Task Run(DataColumn c, MemoryStream ms) {
+        private static async Task Run(DataColumn c, MemoryStream ms) {
             ms.Position = 0;
             using(ParquetReader reader = await ParquetReader.CreateAsync(ms)) {
                 Task<DataColumn[]> columns = reader.ReadEntireRowGroupAsync();

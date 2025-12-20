@@ -174,7 +174,7 @@ namespace Parquet.Serialization.Dremel {
                     WriteValue(valueVar, dl, chRepetitionLevelVar, isLeafVar, isAtomic),
                     isAtomic
                         ? Expression.Empty()
-                        : DissectRecord(valueVar, elementType, field, field.NextDotPropertyPath(chainPath), rlDepth, chRepetitionLevelVar)
+                        : DissectRecord(valueVar, elementType, field, Field.NextDotPropertyPath(chainPath), rlDepth, chRepetitionLevelVar)
                 )
 
             );

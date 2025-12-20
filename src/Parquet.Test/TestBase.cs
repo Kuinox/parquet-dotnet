@@ -117,15 +117,15 @@ public class TestBase {
         new TTI("nullable guid (null)", new DataField<Guid?>("uuid"), null)};
 
 
-    protected Stream OpenTestFile(string name) {
+    protected static Stream OpenTestFile(string name) {
         return F.OpenRead("./data/" + name);
     }
 
-    protected StreamReader OpenTestFileReader(string name) {
+    protected static StreamReader OpenTestFileReader(string name) {
         return new StreamReader("./data/" + name);
     }
 
-    protected async Task<DataColumn?> WriteReadSingleColumn(DataColumn dataColumn) {
+    protected static async Task<DataColumn?> WriteReadSingleColumn(DataColumn dataColumn) {
         using var ms = new MemoryStream();
         // write with built-in extension method
         await ms.WriteSingleRowGroupParquetFileAsync(new ParquetSchema(dataColumn.Field), dataColumn);
@@ -142,7 +142,7 @@ public class TestBase {
         return await rgReader.ReadColumnAsync(dataColumn.Field);
     }
 
-    protected async Task<Tuple<DataColumn[], ParquetSchema>> WriteReadSingleRowGroup(
+    protected static async Task<Tuple<DataColumn[], ParquetSchema>> WriteReadSingleRowGroup(
         ParquetSchema schema, DataColumn[] columns) {
         ParquetSchema readSchema;
         using var ms = new MemoryStream();
@@ -160,7 +160,7 @@ public class TestBase {
            .SequentialWhenAll(), readSchema);
     }
 
-    protected async Task<object> WriteReadSingle(DataField field, object? value, CompressionMethod compressionMethod = CompressionMethod.None) {
+    protected static async Task<object> WriteReadSingle(DataField field, object? value, CompressionMethod compressionMethod = CompressionMethod.None) {
         //for sanity, use disconnected streams
         byte[] data;
 
@@ -199,7 +199,7 @@ public class TestBase {
         }
     }
 
-    protected async Task<List<DataColumn>> ReadColumns(Stream s) {
+    protected static async Task<List<DataColumn>> ReadColumns(Stream s) {
         using ParquetReader reader = await ParquetReader.CreateAsync(s);
         using ParquetRowGroupReader rgr = reader.OpenRowGroupReader(0);
         var r = new List<DataColumn>();

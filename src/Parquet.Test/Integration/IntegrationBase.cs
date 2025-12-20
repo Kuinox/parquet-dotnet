@@ -23,7 +23,7 @@ namespace Parquet.Test.Integration {
                 : "python3";
         }
 
-        private string? ExecAndGetOutput(string execPath, string arguments) {
+        private static string? ExecAndGetOutput(string execPath, string arguments) {
             var psi = new ProcessStartInfo {
                 FileName = execPath,
                 Arguments = arguments,

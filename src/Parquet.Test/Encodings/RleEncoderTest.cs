@@ -85,7 +85,7 @@ namespace Parquet.Test.Encodings {
             Assert.Equal(input, dest[0..2]);
         }
 
-        private byte[] BytesFromBinaryString(string s) {
+        private static byte[] BytesFromBinaryString(string s) {
             return s.Split(' ').Select(s => Convert.ToByte(s, 2)).ToArray();
         }
     }

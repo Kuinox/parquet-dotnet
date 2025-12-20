@@ -147,7 +147,7 @@ namespace Parquet.File {
             if(_dataField.MaxRepetitionLevel > 0) {
                 //todo: use rented buffers, but be aware that rented length can be more than requested so underlying logic relying on array length must be fixed too.
 
-                int levelsRead = ReadLevels(
+                int levelsRead = DataColumnReader.ReadLevels(
                     bytes.Memory.Span, _dataField.MaxRepetitionLevel,
                     pc.GetWriteableRepetitionLevelSpan(),
                     pageValueCount, null, out int usedLength);
@@ -157,7 +157,7 @@ namespace Parquet.File {
 
             int defNulls = 0;
             if(_dataField.MaxDefinitionLevel > 0) {
-                int levelsRead = ReadLevels(
+                int levelsRead = DataColumnReader.ReadLevels(
                     bytes.Memory.Span.Slice(dataUsed), _dataField.MaxDefinitionLevel,
                     pc.GetWriteableDefinitionLevelSpan(),
                     pageValueCount, null, out int usedLength);
@@ -188,7 +188,7 @@ namespace Parquet.File {
 
             if(_dataField.MaxRepetitionLevel > 0) {
                 //todo: use rented buffers, but be aware that rented length can be more than requested so underlying logic relying on array length must be fixed too.
-                int levelsRead = ReadLevels(pageMemory.Span,
+                int levelsRead = DataColumnReader.ReadLevels(pageMemory.Span,
                     _dataField.MaxRepetitionLevel, pc.GetWriteableRepetitionLevelSpan(),
                     ph.DataPageHeaderV2.NumValues, ph.DataPageHeaderV2.RepetitionLevelsByteLength, out int usedLength);
                 dataUsed += usedLength;
@@ -196,7 +196,7 @@ namespace Parquet.File {
             }
 
             if(_dataField.MaxDefinitionLevel > 0) {
-                int levelsRead = ReadLevels(pageMemory.Span.Slice(dataUsed),
+                int levelsRead = DataColumnReader.ReadLevels(pageMemory.Span.Slice(dataUsed),
                     _dataField.MaxDefinitionLevel, pc.GetWriteableDefinitionLevelSpan(),
                     ph.DataPageHeaderV2.NumValues, ph.DataPageHeaderV2.DefinitionLevelsByteLength, out int usedLength);
                 dataUsed += usedLength;
@@ -229,7 +229,7 @@ namespace Parquet.File {
                 pc);
         }
 
-        private int ReadLevels(Span<byte> s, int maxLevel,
+        private static int ReadLevels(Span<byte> s, int maxLevel,
             Span<int> dest,
             int pageSize,
             int? length, out int usedLength) {

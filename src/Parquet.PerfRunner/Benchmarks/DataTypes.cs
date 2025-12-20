@@ -52,7 +52,7 @@ namespace Parquet.PerfRunner.Benchmarks {
             //        .ToArray());
         }
 
-        private async Task Run(DataColumn c) {
+        private static async Task Run(DataColumn c) {
             using var ms = new MemoryStream();
 
             using(ParquetWriter writer = await ParquetWriter.CreateAsync(new ParquetSchema(c.Field), ms)) {

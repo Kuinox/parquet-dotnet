@@ -44,7 +44,7 @@ namespace Parquet.File {
                 throw new ArgumentNullException(nameof(schema));
             }
 
-            _fileMeta = CreateThriftSchema(schema);
+            _fileMeta = ThriftFooter.CreateThriftSchema(schema);
             _fileMeta.NumRows = totalRowCount;
 
 
@@ -168,7 +168,7 @@ namespace Parquet.File {
             return chunk;
         }
 
-        public PageHeader CreateDataPage(int valueCount, bool isDictionary, bool isDeltaEncodable) => 
+        public static PageHeader CreateDataPage(int valueCount, bool isDictionary, bool isDeltaEncodable) => 
             new PageHeader {
                 Type = PageType.DATA_PAGE,
                 DataPageHeader = new DataPageHeader {
@@ -182,7 +182,7 @@ namespace Parquet.File {
                 }
             };
 
-        public PageHeader CreateDictionaryPage(int numValues) {
+        public static PageHeader CreateDictionaryPage(int numValues) {
             var ph = new PageHeader { 
                 Type = PageType.DICTIONARY_PAGE,
                 DictionaryPageHeader = new DictionaryPageHeader {
@@ -231,7 +231,7 @@ namespace Parquet.File {
 
 #region [ Convertion from Model Schema ]
 
-        public FileMetaData CreateThriftSchema(ParquetSchema schema) {
+        public static FileMetaData CreateThriftSchema(ParquetSchema schema) {
             var meta = new FileMetaData();
             meta.Version = 1;
             meta.Schema = new List<SchemaElement>();
@@ -276,26 +276,26 @@ namespace Parquet.File {
                 root = new Node { element = schema[0] };
                 int i = 1;
 
-                BuildSchema(root, schema, root.element.NumChildren ?? 0, ref i);
+                ThriftSchemaTree.BuildSchema(root, schema, root.element.NumChildren ?? 0, ref i);
             }
 
             public Node? Find(SchemaElement tse) {
                 if(_memoizedFindResults.TryGetValue(tse, out Node? node)) {
                     return node;
                 }
-                node = Find(root, tse);
+                node = ThriftSchemaTree.Find(root, tse);
                 _memoizedFindResults.Add(tse, node);
                 return node;
             }
 
-            private Node? Find(Node root, SchemaElement tse) {
+            private static Node? Find(Node root, SchemaElement tse) {
                 if(root.children != null) {
                     foreach(Node child in root.children) {
                         if(child.element == tse)
                             return child;
 
                         if(child.children != null) {
-                            Node? cf = Find(child, tse);
+                            Node? cf = ThriftSchemaTree.Find(child, tse);
                             if(cf != null)
                                 return cf;
                         }
@@ -307,17 +307,17 @@ namespace Parquet.File {
 
             public Node? Find(FieldPath path) {
                 if(path.Length == 0) return null;
-                return Find(root, path);
+                return ThriftSchemaTree.Find(root, path);
             }
 
-            private Node? Find(Node root, FieldPath path) {
+            private static Node? Find(Node root, FieldPath path) {
                 if(root.children != null) {
                     foreach(Node child in root.children) {
                         if(child.element?.Name == path.FirstPart) {
                             if(path.Length == 1)
                                 return child;
 
-                            return Find(child, new FieldPath(path.ToList().Skip(1)));
+                            return ThriftSchemaTree.Find(child, new FieldPath(path.ToList().Skip(1)));
                         }
                     }
                 }
@@ -325,14 +325,14 @@ namespace Parquet.File {
                 return null;
             }
 
-            private void BuildSchema(Node parent, List<SchemaElement> schema, int count, ref int i) {
+            private static void BuildSchema(Node parent, List<SchemaElement> schema, int count, ref int i) {
                 parent.children = new List<Node>();
                 for(int ic = 0; ic < count; ic++) {
                     SchemaElement child = schema[i++];
                     var node = new Node { element = child, parent = parent };
                     parent.children.Add(node);
                     if(child.NumChildren > 0) {
-                        BuildSchema(node, schema, child.NumChildren ?? 0, ref i);
+                        ThriftSchemaTree.BuildSchema(node, schema, child.NumChildren ?? 0, ref i);
                     }
                 }
             }

@@ -219,7 +219,7 @@ namespace Parquet.Serialization.Dremel {
                     _rsmVar.ClearArray(_rlVar)));
         }
 
-        private IEnumerable<Expression> CollectionAddNewDefaultItem(
+        private static IEnumerable<Expression> CollectionAddNewDefaultItem(
             Expression collection,  Type collectionType,
             Expression element,     Type elementType) {
 
@@ -251,7 +251,7 @@ namespace Parquet.Serialization.Dremel {
             throw new NotSupportedException();
         }
 
-        private Expression CollectionGetItemByIndex(
+        private static Expression CollectionGetItemByIndex(
             Expression collection, Type collectionType,
             Type elementType,
             Expression idx) {
@@ -289,9 +289,9 @@ namespace Parquet.Serialization.Dremel {
                 Expression.IfThenElse(
                     Expression.LessThanOrEqual(paramDC.CollectionCount(collectionType), paramIdx),
 
-                    Expression.Block(CollectionAddNewDefaultItem(paramDC, collectionType, paramResult, elementType)),
+                    Expression.Block(FieldAssemblerCompiler<TClass>.CollectionAddNewDefaultItem(paramDC, collectionType, paramResult, elementType)),
 
-                    Expression.Assign(paramResult, CollectionGetItemByIndex(paramDC, collectionType, elementType, paramIdx))),
+                    Expression.Assign(paramResult, FieldAssemblerCompiler<TClass>.CollectionGetItemByIndex(paramDC, collectionType, elementType, paramIdx))),
 
                 paramResult);
         }
@@ -361,7 +361,7 @@ namespace Parquet.Serialization.Dremel {
 
         record ClassMember(Expression Accessor, Expression IsNull, Type Type);
 
-        private Expression CreateInstance(Type t) {
+        private static Expression CreateInstance(Type t) {
             Expression r = t.IsArray
                 ? Expression.NewArrayBounds(t.GetElementType()!, Zero)
                 : Expression.New(t);
@@ -554,7 +554,7 @@ namespace Parquet.Serialization.Dremel {
 
                         // keep traversing the tree
                         AssembleRecord(collectionElementVar, collectionElementType,
-                            schemaField, schemaField.NextDotPropertyPath(schemaPath)));
+                            schemaField, Field.NextDotPropertyPath(schemaPath)));
 
 #if DEBUG
                     leafExpr = DebugWrap(leafExpr, "non-atomic");
@@ -594,7 +594,7 @@ namespace Parquet.Serialization.Dremel {
 
                         AssembleRecord(deepVar, currentVarType,
                             schemaField,
-                            schemaField.NextDotPropertyPath(schemaPath)));
+                            Field.NextDotPropertyPath(schemaPath)));
 
 #if DEBUG
                     iteration = DebugWrap(iteration, "non-atomic");
@@ -611,7 +611,7 @@ namespace Parquet.Serialization.Dremel {
 
                 var x = new List<Expression>();
                 if(nullCheck != null) {
-                    x.Add(Expression.IfThen(nullCheck, Expression.Assign(currentVar, CreateInstance(currentVarType))));
+                    x.Add(Expression.IfThen(nullCheck, Expression.Assign(currentVar, FieldAssemblerCompiler<TClass>.CreateInstance(currentVarType))));
                 }
                 x.Add(iteration);
 
@@ -627,7 +627,7 @@ namespace Parquet.Serialization.Dremel {
                     if(nullCheck != null) {
                         x.Add(Expression.IfThen(
                                 nullCheck,
-                                Expression.Assign(currentVar, CreateInstance(currentVarType))));
+                                Expression.Assign(currentVar, FieldAssemblerCompiler<TClass>.CreateInstance(currentVarType))));
                     }
                     x.Add(iteration);
 

@@ -26,7 +26,7 @@ namespace Parquet.Test.Serialisation {
     /// </summary>
     public class ParquetSerializerTest : TestBase {
 
-        private async Task Compare<T>(List<T> input, bool asJson = false, string? saveAsFile = null, bool useAsync = false) where T : new() {
+        private static async Task Compare<T>(List<T> input, bool asJson = false, string? saveAsFile = null, bool useAsync = false) where T : new() {
 
             // serialize to parquet
             using var ms = new MemoryStream();
@@ -52,7 +52,7 @@ namespace Parquet.Test.Serialisation {
             }
         }
 
-        private async Task DictCompare<TSchema>(List<Dictionary<string, object?>> input, bool asJson = false,
+        private static async Task DictCompare<TSchema>(List<Dictionary<string, object?>> input, bool asJson = false,
             string? writeTestFile = null) {
 
             // serialize to parquet
