@@ -136,26 +136,28 @@ namespace Parquet.File {
             ) {
             CompressionCodec codec = (CompressionCodec)(int)compression;
 
-            var chunk = new ColumnChunk();
-            chunk.FileOffset = startPos;
-            chunk.MetaData = new ColumnMetaData();
-            chunk.MetaData.NumValues = column.NumValues;
-            chunk.MetaData.Type = schemaElement.Type!.Value;
-            chunk.MetaData.Codec = codec;
-            chunk.MetaData.DataPageOffset = startPos;
-            chunk.MetaData.Encodings = new List<Encoding> {
-                Encoding.RLE,
-                Encoding.BIT_PACKED,
-                setDBP ? Encoding.DELTA_BINARY_PACKED : Encoding.PLAIN
+            var chunk = new ColumnChunk {
+                FileOffset = startPos,
+                MetaData = new ColumnMetaData {
+                    NumValues = column.NumValues,
+                    Type = schemaElement.Type!.Value,
+                    Codec = codec,
+                    DataPageOffset = startPos,
+                    Encodings = [
+                        Encoding.RLE,
+                        Encoding.BIT_PACKED,
+                        setDBP ? Encoding.DELTA_BINARY_PACKED : Encoding.PLAIN
+                    ],
+                    PathInSchema = path.ToList(),
+
+                    //generate stats for column chunk
+                    Statistics = column.Statistics.ToThriftStatistics(schemaElement),
+
+                    //the following counters must include both data size and header size
+                    TotalCompressedSize = columnSizes.CompressedSize,
+                    TotalUncompressedSize = columnSizes.UncompressedSize
+                }
             };
-            chunk.MetaData!.PathInSchema = path.ToList();
-
-            //generate stats for column chunk
-            chunk.MetaData!.Statistics = column.Statistics.ToThriftStatistics(schemaElement);
-
-            //the following counters must include both data size and header size
-            chunk.MetaData.TotalCompressedSize = columnSizes.CompressedSize;
-            chunk.MetaData.TotalUncompressedSize = columnSizes.UncompressedSize;
 
             if(keyValueMetadata != null && keyValueMetadata.Count > 0) {
                 chunk.MetaData.KeyValueMetadata = keyValueMetadata
