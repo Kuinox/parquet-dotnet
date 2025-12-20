@@ -688,7 +688,9 @@ namespace Parquet.Test.Serialisation {
         public class ReadOnlyProperty {
             public int Id { get; set; }
 
-            public static int ReadOnly => 42;
+#pragma warning disable CA1822 // Reflection test rely on field being present
+            public int ReadOnly => 42;
+#pragma warning restore CA1822
         }
 
         [Fact]

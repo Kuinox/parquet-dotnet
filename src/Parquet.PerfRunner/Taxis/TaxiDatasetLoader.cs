@@ -5,8 +5,6 @@ using ParquetReaderNet = Parquet.ParquetReader;
 namespace Parquet.PerfRunner.Taxis;
 
 class TaxiDatasetLoader {
-
-
     // Official NYC TLC parquet. The "tripdata" dataset is a single month; "tripdata-large" combines multiple months.
     private const string _baseUrl = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
     private static readonly HttpClient _httpClient = new();
