@@ -48,14 +48,14 @@ class DataColumnWriter {
         CancellationToken cancellationToken = default) {
         long startPos = _stream.Position;
 
+        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(
+            column, _schemaElement,
+            cancellationToken);
+
         // Num_values in the chunk does include null values - I have validated this by dumping spark-generated file.
         ColumnChunk chunk = _footer.CreateColumnChunk(
             _compressionMethod, startPos, _schemaElement.Type!.Value, fullPath, column.NumValues,
             _keyValueMetadata);
-
-        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(
-            column, _schemaElement,
-            cancellationToken);
 
         if(setDBP) {
             chunk.MetaData!.Encodings[2] = Encoding.DELTA_BINARY_PACKED;
