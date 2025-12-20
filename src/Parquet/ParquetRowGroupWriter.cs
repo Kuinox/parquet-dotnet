@@ -99,15 +99,9 @@ namespace Parquet {
 
             FieldPath path = _footer.GetPath(tse);
 
-            var writer = new DataColumnWriter(_stream, _footer, tse,
-               _compressionMethod,
-               _formatOptions,
-               _compressionLevel,
-               customMetadata);
-
-            ColumnChunk chunk = await writer.WriteAsync(path, column, cancellationToken);
+            ColumnChunk chunk = await DataColumnWriter.WriteAsync(path, column, _stream, tse, _compressionLevel,
+                _compressionMethod, customMetadata, _formatOptions, cancellationToken);
             _owGroup.Columns.Add(chunk);
-
         }
 
         /// <summary>

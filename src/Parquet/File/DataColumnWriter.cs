@@ -14,60 +14,37 @@ using Parquet.Schema;
 
 namespace Parquet.File;
 
-class DataColumnWriter {
-    private readonly Stream _stream;
-    private readonly ThriftFooter _footer;
-    private readonly SchemaElement _schemaElement;
-    private readonly CompressionMethod _compressionMethod;
-    private readonly CompressionLevel _compressionLevel;
-    private readonly Dictionary<string, string>? _keyValueMetadata;
-    private readonly ParquetOptions _options;
+static class DataColumnWriter {
     private static readonly RecyclableMemoryStreamManager _rmsMgr = new RecyclableMemoryStreamManager();
 
-    public DataColumnWriter(
-       Stream stream,
-       ThriftFooter footer,
-       SchemaElement schemaElement,
-       CompressionMethod compressionMethod,
-       ParquetOptions options,
-       CompressionLevel compressionLevel,
-       Dictionary<string, string>? keyValueMetadata) {
-        _stream = stream;
-        _footer = footer;
-        _schemaElement = schemaElement;
-        _compressionMethod = compressionMethod;
-        _compressionLevel = compressionLevel;
-        _keyValueMetadata = keyValueMetadata;
-        _options = options;
+    public static async Task<ColumnChunk> WriteAsync(
+        FieldPath fullPath, DataColumn column, Stream stream, SchemaElement schemaElement,
+        CompressionLevel compressionLevel, CompressionMethod compressionMethod,
+        Dictionary<string, string>? keyValueMetadata, ParquetOptions options,
+        CancellationToken cancellationToken = default) {
+        long startPos = stream.Position;
+
         _rmsMgr.Settings.MaximumSmallPoolFreeBytes = options.MaximumSmallPoolFreeBytes;
         _rmsMgr.Settings.MaximumLargePoolFreeBytes = options.MaximumLargePoolFreeBytes;
-    }
 
-    public async Task<ColumnChunk> WriteAsync(
-        FieldPath fullPath, DataColumn column,
-        CancellationToken cancellationToken = default) {
-        long startPos = _stream.Position;
-
-        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(
-            column, _schemaElement,
-            cancellationToken);
+        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(column, stream, schemaElement, options, compressionLevel, compressionMethod, cancellationToken);
 
         // Num_values in the chunk does include null values - I have validated this by dumping spark-generated file.
         ColumnChunk chunk = ThriftFooter.CreateColumnChunk(
-            _compressionMethod, startPos, _schemaElement, fullPath, column,
-            _keyValueMetadata, setDBP, columnSizes);
+            compressionMethod, startPos, schemaElement, fullPath, column,
+            keyValueMetadata, setDBP, columnSizes);
 
         return chunk;
     }
 
 
 
-    private async Task<ColumnSizes> CompressAndWriteAsync(
-        PageHeader ph, MemoryStream uncompressedData,
-        CancellationToken cancellationToken) {
+    private async static Task<ColumnSizes> CompressAndWriteAsync(
+        PageHeader ph, MemoryStream uncompressedData, CompressionLevel compressionLevel,
+        CompressionMethod compressionMethod, Stream stream, CancellationToken cancellationToken) {
         int uncompressedLength = (int)uncompressedData.Length;
         using IMemoryOwner<byte> pageData = await Compressor.Instance.CompressAsync(
-            _compressionMethod, _compressionLevel, uncompressedData);
+            compressionMethod, compressionLevel, uncompressedData);
         int compressedLength = pageData.Memory.Length;
 
         ph.UncompressedPageSize = uncompressedLength;
@@ -79,14 +56,14 @@ class DataColumnWriter {
             ph.Write(new Meta.Proto.ThriftCompactProtocolWriter(headerMs));
             headerSize = (int)headerMs.Length;
             headerMs.Position = 0;
-            _stream.Flush();
+            stream.Flush();
 
             // write header
-            await headerMs.CopyToAsync(_stream);
+            await headerMs.CopyToAsync(stream);
         }
 
         // write data
-        await pageData.Memory.CopyToAsync(_stream);
+        await pageData.Memory.CopyToAsync(stream);
 
         return new ColumnSizes(
             compressedLength + headerSize,
@@ -94,8 +71,9 @@ class DataColumnWriter {
         );
     }
 
-    private async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
-       SchemaElement tse,
+    private static async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
+       Stream stream,
+       SchemaElement tse, ParquetOptions options, CompressionLevel compressionLevel, CompressionMethod compressionMethod,
        CancellationToken cancellationToken = default) {
 
         column.Field.EnsureAttachedToSchema(nameof(column));
@@ -110,7 +88,7 @@ class DataColumnWriter {
          */
 
         using var pc = new PackedColumn(column);
-        pc.Pack(_options.UseDictionaryEncoding, _options.DictionaryEncodingThreshold);
+        pc.Pack(options.UseDictionaryEncoding, options.DictionaryEncodingThreshold);
 
         // dictionary page
         if(pc.HasDictionary) {
@@ -120,7 +98,7 @@ class DataColumnWriter {
                    tse,
                    ms, column.Statistics);
 
-            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, cancellationToken);
+            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, compressionLevel, compressionMethod, stream, cancellationToken);
             r = r.Add(cs);
         }
 
@@ -128,7 +106,7 @@ class DataColumnWriter {
         // data page
         using(MemoryStream ms = _rmsMgr.GetStream()) {
             Array data = pc.GetPlainData(out int offset, out int count);
-            bool deltaEncode = column.IsDeltaEncodable && _options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
+            bool deltaEncode = column.IsDeltaEncodable && options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
 
 
             if(pc.HasRepetitionLevels) {
@@ -155,10 +133,11 @@ class DataColumnWriter {
                 }
             }
 
-            Statistics statistics = column.Statistics.ToThriftStatistics(tse); ;
+            Statistics statistics = column.Statistics.ToThriftStatistics(tse);
+            ;
             // data page Num_values also does include NULLs
             PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode, statistics);
-            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, cancellationToken);
+            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, compressionLevel, compressionMethod, stream, cancellationToken);
             r = r.Add(cs);
         }
 
