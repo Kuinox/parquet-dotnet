@@ -155,9 +155,9 @@ class DataColumnWriter {
                 }
             }
 
+            Statistics statistics = column.Statistics.ToThriftStatistics(tse); ;
             // data page Num_values also does include NULLs
-            PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode);
-            ph.DataPageHeader!.Statistics = column.Statistics.ToThriftStatistics(tse);
+            PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode, statistics);
             ColumnSizes cs = await CompressAndWriteAsync(ph, ms, cancellationToken);
             r = r.Add(cs);
         }
