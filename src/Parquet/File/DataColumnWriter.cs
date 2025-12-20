@@ -52,29 +52,17 @@ class DataColumnWriter {
             column, _schemaElement,
             cancellationToken);
 
+        Statistics statistics = column.Statistics.ToThriftStatistics(_schemaElement);
+
         // Num_values in the chunk does include null values - I have validated this by dumping spark-generated file.
         ColumnChunk chunk = _footer.CreateColumnChunk(
             _compressionMethod, startPos, _schemaElement.Type!.Value, fullPath, column.NumValues,
-            _keyValueMetadata);
-
-        if(setDBP) {
-            chunk.MetaData!.Encodings[2] = Encoding.DELTA_BINARY_PACKED;
-        }
-
-        //generate stats for column chunk
-        chunk.MetaData!.Statistics = column.Statistics.ToThriftStatistics(_schemaElement);
-
-        //the following counters must include both data size and header size
-        chunk.MetaData.TotalCompressedSize = columnSizes.CompressedSize;
-        chunk.MetaData.TotalUncompressedSize = columnSizes.UncompressedSize;
+            _keyValueMetadata, setDBP, statistics, columnSizes);
 
         return chunk;
     }
 
-    class ColumnSizes {
-        public int CompressedSize;
-        public int UncompressedSize;
-    }
+
 
     private async Task CompressAndWriteAsync(
         PageHeader ph, MemoryStream uncompressedData,
