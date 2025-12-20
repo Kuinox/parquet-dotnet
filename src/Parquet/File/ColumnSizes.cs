@@ -1,6 +1,14 @@
-﻿namespace Parquet.File;
+﻿using System.Diagnostics.Contracts;
 
-internal class ColumnSizes {
-    public int CompressedSize;
-    public int UncompressedSize;
+namespace Parquet.File;
+
+internal readonly struct ColumnSizes(int compressedSize, int uncompressedSize) {
+    public readonly int CompressedSize = compressedSize;
+    public readonly int UncompressedSize = uncompressedSize;
+
+    [Pure]
+    public ColumnSizes Add(ColumnSizes other) => new(
+            CompressedSize + other.CompressedSize,
+            UncompressedSize + other.UncompressedSize
+        );
 }

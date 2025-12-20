@@ -64,11 +64,9 @@ class DataColumnWriter {
 
 
 
-    private async Task CompressAndWriteAsync(
+    private async Task<ColumnSizes> CompressAndWriteAsync(
         PageHeader ph, MemoryStream uncompressedData,
-        ColumnSizes cs,
         CancellationToken cancellationToken) {
-
         int uncompressedLength = (int)uncompressedData.Length;
         using IMemoryOwner<byte> pageData = await Compressor.Instance.CompressAsync(
             _compressionMethod, _compressionLevel, uncompressedData);
@@ -76,26 +74,26 @@ class DataColumnWriter {
 
         ph.UncompressedPageSize = uncompressedLength;
         ph.CompressedPageSize = compressedLength;
+        int headerSize;
 
         //write the header in
         using(MemoryStream headerMs = _rmsMgr.GetStream()) {
             ph.Write(new Meta.Proto.ThriftCompactProtocolWriter(headerMs));
-            int headerSize = (int)headerMs.Length;
+            headerSize = (int)headerMs.Length;
             headerMs.Position = 0;
             _stream.Flush();
 
             // write header
             await headerMs.CopyToAsync(_stream);
-
-            cs.CompressedSize += headerSize;
-            cs.UncompressedSize += headerSize;
         }
 
         // write data
         await pageData.Memory.CopyToAsync(_stream);
 
-        cs.CompressedSize += ph.CompressedPageSize;
-        cs.UncompressedSize += ph.UncompressedPageSize;
+        return new ColumnSizes(
+            compressedLength + headerSize,
+            uncompressedLength + headerSize
+        );
     }
 
     private async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
@@ -124,7 +122,8 @@ class DataColumnWriter {
                    tse,
                    ms, column.Statistics);
 
-            await CompressAndWriteAsync(ph, ms, r, cancellationToken);
+            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, cancellationToken);
+            r = r.Add(cs);
         }
 
 
@@ -160,7 +159,8 @@ class DataColumnWriter {
             }
 
             ph.DataPageHeader!.Statistics = column.Statistics.ToThriftStatistics(tse);
-            await CompressAndWriteAsync(ph, ms, r, cancellationToken);
+            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, cancellationToken);
+            r = r.Add(cs);
         }
 
         return (r, setDBP);
