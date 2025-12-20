@@ -12,7 +12,8 @@ using Parquet.Extensions;
 using Parquet.Meta;
 using Parquet.Schema;
 
-namespace Parquet.File; 
+namespace Parquet.File;
+
 class DataColumnWriter {
     private readonly Stream _stream;
     private readonly ThriftFooter _footer;
@@ -52,9 +53,14 @@ class DataColumnWriter {
             _compressionMethod, startPos, _schemaElement.Type!.Value, fullPath, column.NumValues,
             _keyValueMetadata);
 
-        ColumnSizes columnSizes = await WriteColumnAsync(
-            chunk, column, _schemaElement,
+        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(
+            column, _schemaElement,
             cancellationToken);
+
+        if(setDBP) {
+            chunk.MetaData!.Encodings[2] = Encoding.DELTA_BINARY_PACKED;
+        }
+
         //generate stats for column chunk
         chunk.MetaData!.Statistics = column.Statistics.ToThriftStatistics(_schemaElement);
 
@@ -104,12 +110,13 @@ class DataColumnWriter {
         cs.UncompressedSize += ph.UncompressedPageSize;
     }
 
-    private async Task<ColumnSizes> WriteColumnAsync(ColumnChunk chunk, DataColumn column,
+    private async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
        SchemaElement tse,
        CancellationToken cancellationToken = default) {
 
         column.Field.EnsureAttachedToSchema(nameof(column));
 
+        bool setDBP = false;
         var r = new ColumnSizes();
 
         /*
@@ -132,11 +139,12 @@ class DataColumnWriter {
             await CompressAndWriteAsync(ph, ms, r, cancellationToken);
         }
 
+
         // data page
         using(MemoryStream ms = _rmsMgr.GetStream()) {
             Array data = pc.GetPlainData(out int offset, out int count);
             bool deltaEncode = column.IsDeltaEncodable && _options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
-           
+
             // data page Num_values also does include NULLs
             PageHeader ph = _footer.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode);
             if(pc.HasRepetitionLevels) {
@@ -146,16 +154,18 @@ class DataColumnWriter {
                 WriteLevels(ms, pc.DefinitionLevels!, column.DefinitionLevels!.Length, column.Field.MaxDefinitionLevel);
             }
 
+
+
             if(pc.HasDictionary) {
                 // dictionary indexes are always encoded with RLE
                 int[] indexes = pc.GetDictionaryIndexes(out int indexesLength)!;
                 int bitWidth = pc.Dictionary!.Length.GetBitWidth();
                 ms.WriteByte((byte)bitWidth);   // bit width is stored as 1 byte before encoded data
                 RleBitpackedHybridEncoder.Encode(ms, indexes.AsSpan(0, indexesLength), bitWidth);
-            } else {                
+            } else {
                 if(deltaEncode) {
                     DeltaBinaryPackedEncoder.Encode(data, offset, count, ms, column.Statistics);
-                    chunk.MetaData!.Encodings[2] = Encoding.DELTA_BINARY_PACKED;
+                    setDBP = true;
                 } else {
                     ParquetPlainEncoder.Encode(data, offset, count, tse, ms, pc.HasDictionary ? null : column.Statistics);
                 }
@@ -165,7 +175,7 @@ class DataColumnWriter {
             await CompressAndWriteAsync(ph, ms, r, cancellationToken);
         }
 
-        return r;
+        return (r, setDBP);
     }
 
     private static void WriteLevels(Stream s, Span<int> levels, int count, int maxValue) {
