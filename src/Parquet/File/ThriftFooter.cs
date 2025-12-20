@@ -8,6 +8,7 @@ using Parquet.Encodings;
 using Parquet.Schema;
 using Parquet.Meta;
 using Parquet.Meta.Proto;
+using Parquet.Data;
 
 namespace Parquet.File {
     class ThriftFooter {
@@ -129,18 +130,17 @@ namespace Parquet.File {
             return rg;
         }
 
-        public ColumnChunk CreateColumnChunk(CompressionMethod compression, long startPos,
-            Parquet.Meta.Type columnType, FieldPath path, int valuesCount,
-            Dictionary<string, string>? keyValueMetadata, bool setDBP,
-            Statistics statistics, ColumnSizes columnSizes
+        public static ColumnChunk CreateColumnChunk(CompressionMethod compression, long startPos,
+            SchemaElement schemaElement, FieldPath path, DataColumn column,
+            Dictionary<string, string>? keyValueMetadata, bool setDBP, ColumnSizes columnSizes
             ) {
             CompressionCodec codec = (CompressionCodec)(int)compression;
 
             var chunk = new ColumnChunk();
             chunk.FileOffset = startPos;
             chunk.MetaData = new ColumnMetaData();
-            chunk.MetaData.NumValues = valuesCount;
-            chunk.MetaData.Type = columnType;
+            chunk.MetaData.NumValues = column.NumValues;
+            chunk.MetaData.Type = schemaElement.Type!.Value;
             chunk.MetaData.Codec = codec;
             chunk.MetaData.DataPageOffset = startPos;
             chunk.MetaData.Encodings = new List<Encoding> {
@@ -151,7 +151,7 @@ namespace Parquet.File {
             chunk.MetaData!.PathInSchema = path.ToList();
 
             //generate stats for column chunk
-            chunk.MetaData!.Statistics = statistics;
+            chunk.MetaData!.Statistics = column.Statistics.ToThriftStatistics(schemaElement);
 
             //the following counters must include both data size and header size
             chunk.MetaData.TotalCompressedSize = columnSizes.CompressedSize;
