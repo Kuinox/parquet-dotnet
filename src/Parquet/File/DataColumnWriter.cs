@@ -38,12 +38,14 @@ static class DataColumnWriter {
     }
 
 
+    readonly record struct CompressResult(ColumnSizes ColumnSizes, MemoryStream HeaderMs, IMemoryOwner<byte> PageData) {
+    }
 
-    private async static Task<ColumnSizes> CompressAndWriteAsync(
-        PageHeader ph, MemoryStream uncompressedData, CompressionLevel compressionLevel,
-        CompressionMethod compressionMethod, Stream stream, CancellationToken cancellationToken) {
+
+    private static async Task<CompressResult> CompressAsync(
+        PageHeader ph, MemoryStream uncompressedData, CompressionLevel compressionLevel, CompressionMethod compressionMethod) {
         int uncompressedLength = (int)uncompressedData.Length;
-        using IMemoryOwner<byte> pageData = await Compressor.Instance.CompressAsync(
+        IMemoryOwner<byte> pageData = await Compressor.Instance.CompressAsync(
             compressionMethod, compressionLevel, uncompressedData);
         int compressedLength = pageData.Memory.Length;
 
@@ -52,23 +54,26 @@ static class DataColumnWriter {
         int headerSize;
 
         //write the header in
-        using(MemoryStream headerMs = _rmsMgr.GetStream()) {
-            ph.Write(new Meta.Proto.ThriftCompactProtocolWriter(headerMs));
-            headerSize = (int)headerMs.Length;
-            headerMs.Position = 0;
-            stream.Flush();
+        MemoryStream headerMs = _rmsMgr.GetStream();
+        ph.Write(new Meta.Proto.ThriftCompactProtocolWriter(headerMs));
+        headerSize = (int)headerMs.Length;
+        headerMs.Position = 0;
 
-            // write header
-            await headerMs.CopyToAsync(stream);
-        }
-
-        // write data
-        await pageData.Memory.CopyToAsync(stream);
-
-        return new ColumnSizes(
+        var cs = new ColumnSizes(
             compressedLength + headerSize,
             uncompressedLength + headerSize
         );
+
+        return new CompressResult(
+            cs, headerMs, pageData
+        );
+    }
+
+    private static async Task WriteAsync(Stream stream, CompressResult compressResult) {
+        stream.Flush();
+
+        await compressResult.HeaderMs.CopyToAsync(stream);
+        await compressResult.PageData.Memory.CopyToAsync(stream);
     }
 
     private static async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
@@ -90,21 +95,25 @@ static class DataColumnWriter {
         using var pc = new PackedColumn(column);
         pc.Pack(options.UseDictionaryEncoding, options.DictionaryEncodingThreshold);
 
-        // dictionary page
-        if(pc.HasDictionary) {
-            PageHeader ph = ThriftFooter.CreateDictionaryPage(pc.Dictionary!.Length);
+        (CompressResult dictCompressResult, MemoryStream ms)? dictWriteState = null;
+        try {
+            // dictionary page
+            if(pc.HasDictionary) {
+                PageHeader phDict = ThriftFooter.CreateDictionaryPage(pc.Dictionary!.Length);
+                using MemoryStream msDict = _rmsMgr.GetStream();
+                ParquetPlainEncoder.Encode(pc.Dictionary, 0, pc.Dictionary.Length,
+                       tse,
+                       msDict, column.Statistics);
+
+                CompressResult dictCompressResult = await CompressAsync(phDict, msDict, compressionLevel, compressionMethod);
+                r = r.Add(dictCompressResult.ColumnSizes);
+                dictWriteState = (dictCompressResult, msDict);
+            }
+
+
+            // data page
             using MemoryStream ms = _rmsMgr.GetStream();
-            ParquetPlainEncoder.Encode(pc.Dictionary, 0, pc.Dictionary.Length,
-                   tse,
-                   ms, column.Statistics);
 
-            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, compressionLevel, compressionMethod, stream, cancellationToken);
-            r = r.Add(cs);
-        }
-
-
-        // data page
-        using(MemoryStream ms = _rmsMgr.GetStream()) {
             Array data = pc.GetPlainData(out int offset, out int count);
             bool deltaEncode = column.IsDeltaEncodable && options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
 
@@ -134,11 +143,30 @@ static class DataColumnWriter {
             }
 
             Statistics statistics = column.Statistics.ToThriftStatistics(tse);
-            ;
+
             // data page Num_values also does include NULLs
             PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode, statistics);
-            ColumnSizes cs = await CompressAndWriteAsync(ph, ms, compressionLevel, compressionMethod, stream, cancellationToken);
-            r = r.Add(cs);
+            CompressResult cr = await CompressAsync(ph, ms, compressionLevel, compressionMethod);
+            using IMemoryOwner<byte> _ = cr.PageData;
+            using MemoryStream _1 = cr.HeaderMs;
+            r = r.Add(cr.ColumnSizes);
+
+
+            // from this point on, we are back to writing on the stream
+            if(dictWriteState.HasValue) {
+                await WriteAsync(stream, dictWriteState.Value.dictCompressResult);
+            }
+
+            await WriteAsync(stream, cr);
+
+        } finally { // sadly need to cleanup manually due to the optional lifetime.
+            if(dictWriteState.HasValue) {
+                (CompressResult dictCompressResult, MemoryStream ms) = dictWriteState.Value;
+                ms.Dispose();
+                dictCompressResult.PageData.Dispose();
+                dictCompressResult.HeaderMs.Dispose();
+            }
+            
         }
 
         return (r, setDBP);
