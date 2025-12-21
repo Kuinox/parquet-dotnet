@@ -1,5 +1,6 @@
 ﻿// for performance tests only
 
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
 using Parquet.PerfRunner.Benchmarks;
 
@@ -18,6 +19,9 @@ switch(benchName) {
         break;
     case "progression":
         BenchmarkRunner.Run<VersionedBenchmark>();
+        break;
+    case "parallel":
+        BenchmarkRunner.Run<ParallelWriteBenchmark>();
         break;
     case "sharp-compare-taxi":
         BenchmarkRunner.Run<ParquetSharpComparisonBenchmark>();

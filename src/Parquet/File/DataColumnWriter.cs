@@ -21,13 +21,13 @@ static class DataColumnWriter {
         FieldPath fullPath, DataColumn column, Stream stream, SchemaElement schemaElement,
         CompressionLevel compressionLevel, CompressionMethod compressionMethod,
         Dictionary<string, string>? keyValueMetadata, ParquetOptions options,
-        CancellationToken cancellationToken = default) {
+        OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = default) {
         long startPos = stream.Position;
 
         _rmsMgr.Settings.MaximumSmallPoolFreeBytes = options.MaximumSmallPoolFreeBytes;
         _rmsMgr.Settings.MaximumLargePoolFreeBytes = options.MaximumLargePoolFreeBytes;
 
-        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(column, stream, schemaElement, options, compressionLevel, compressionMethod, cancellationToken);
+        (ColumnSizes columnSizes, bool setDBP) = await WriteColumnAsync(column, stream, schemaElement, options, compressionLevel, compressionMethod, orderedCommitGate, cancellationToken);
 
         // Num_values in the chunk does include null values - I have validated this by dumping spark-generated file.
         ColumnChunk chunk = ThriftFooter.CreateColumnChunk(
@@ -38,9 +38,7 @@ static class DataColumnWriter {
     }
 
 
-    readonly record struct CompressResult(ColumnSizes ColumnSizes, MemoryStream HeaderMs, IMemoryOwner<byte> PageData) {
-    }
-
+    readonly record struct CompressResult(ColumnSizes ColumnSizes, MemoryStream HeaderMs, IMemoryOwner<byte> PageData);
 
     private static async Task<CompressResult> CompressAsync(
         PageHeader ph, MemoryStream uncompressedData, CompressionLevel compressionLevel, CompressionMethod compressionMethod) {
@@ -76,10 +74,13 @@ static class DataColumnWriter {
         await compressResult.PageData.Memory.CopyToAsync(stream);
     }
 
-    private static async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(DataColumn column,
-       Stream stream,
-       SchemaElement tse, ParquetOptions options, CompressionLevel compressionLevel, CompressionMethod compressionMethod,
-       CancellationToken cancellationToken = default) {
+    private static async Task<(ColumnSizes cs, bool setDBP)> WriteColumnAsync(
+        DataColumn column, Stream stream, SchemaElement tse, ParquetOptions options, CompressionLevel compressionLevel,
+        CompressionMethod compressionMethod, OrderedCommitGate orderedCommitGate,
+        CancellationToken cancellationToken = default) {
+
+        OrderedCommitGate.Token commitToken = orderedCommitGate.QueueForCommit();
+        await Task.Yield();
 
         column.Field.EnsureAttachedToSchema(nameof(column));
 
@@ -151,6 +152,7 @@ static class DataColumnWriter {
             using MemoryStream _1 = cr.HeaderMs;
             r = r.Add(cr.ColumnSizes);
 
+            await orderedCommitGate.WaitForCommit(commitToken);
 
             // from this point on, we are back to writing on the stream
             if(dictWriteState.HasValue) {
@@ -166,8 +168,9 @@ static class DataColumnWriter {
                 dictCompressResult.PageData.Dispose();
                 dictCompressResult.HeaderMs.Dispose();
             }
-            
+
         }
+        orderedCommitGate.CommitDone(commitToken);
 
         return (r, setDBP);
     }
