@@ -43,7 +43,7 @@ public class TestBase {
         new TTI("byte array", new DataField<byte[]>("byte array"), Encoding.UTF8.GetBytes("raw byte string")),
         new TTI("float", new DataField<float>("float"), 1.23f),
         new TTI("double", new DataField<double>("double"), 10.44D),
-        new TTI("simple DateTime", new DataField<DateTime>("datetime"), DateTime.UtcNow.RoundToSecond()),
+        new TTI("simple DateTime", new DataField<DateTime>("datetime"), DateTime.UtcNow.FloorToSecond()),
         new TTI("long", new DataField<long>("long"), (long)1234),
 
         //difference cases of decimals
@@ -58,11 +58,11 @@ public class TestBase {
         //loses precision slightly, i.e.
         //Expected: 2017-07-13T10:58:44.3767154+00:00
         //Actual:   2017-07-12T10:58:44.3770000+00:00
-        new TTI("dateTime", new DataField<DateTime>("dateTime"), DateTime.UtcNow.RoundToSecond()),
-        new TTI("impala date", new DateTimeDataField("dateImpala", DateTimeFormat.Impala), DateTime.UtcNow.RoundToSecond()),
-        new TTI("dateDateAndTimeMillis", new DateTimeDataField("dateDateAndTime", DateTimeFormat.DateAndTime), DateTime.UtcNow.RoundToMillisecond()),
+        new TTI("dateTime", new DataField<DateTime>("dateTime"), DateTime.UtcNow.FloorToSecond()),
+        new TTI("impala date", new DateTimeDataField("dateImpala", DateTimeFormat.Impala), DateTime.UtcNow.FloorToSecond()),
+        new TTI("dateDateAndTimeMillis", new DateTimeDataField("dateDateAndTime", DateTimeFormat.DateAndTime), DateTime.UtcNow.FloorToMillisecond()),
 #if NET7_0_OR_GREATER
-        new TTI("dateDateAndTimeMicros", new DateTimeDataField("dateDateAndTime", DateTimeFormat.DateAndTimeMicros), DateTime.UtcNow.RoundToMicrosecond()),
+        new TTI("dateDateAndTimeMicros", new DateTimeDataField("dateDateAndTime", DateTimeFormat.DateAndTimeMicros), DateTime.UtcNow.FloorToMicrosecond()),
 #endif
         new TTI("dateTime unknown kind", new DataField<DateTime>("dateTime unknown kind"), new DateTime(2020, 06, 10, 11, 12, 13)),
         new TTI("impala date unknown kind", new DateTimeDataField("dateImpala unknown kind", DateTimeFormat.Impala), new DateTime(2020, 06, 10, 11, 12, 13)),
@@ -73,7 +73,7 @@ public class TestBase {
         new TTI("timestamp utc kind", new DateTimeDataField("timestamp utc kind", DateTimeFormat.Timestamp, true), new DateTime(2020, 06, 10, 11, 12, 13, DateTimeKind.Utc)),
         new TTI("timestamp local kind", new DateTimeDataField("timestamp local kind", DateTimeFormat.Timestamp, false), new DateTime(2020, 06, 10, 11, 12, 13, DateTimeKind.Local)),
         // don't want any excess info in the offset INT32 doesn't contain or care about this data 
-        new TTI("dateDate", new DateTimeDataField("dateDate", DateTimeFormat.Date), DateTime.UtcNow.RoundToDay()),
+        new TTI("dateDate", new DateTimeDataField("dateDate", DateTimeFormat.Date), DateTime.UtcNow.FloorToDay()),
 #if !NETCOREAPP3_1
         new TTI("dateOnly", new DataField<DateOnly>("dateOnly"), DateOnly.FromDateTime(DateTime.UtcNow)),
 #endif

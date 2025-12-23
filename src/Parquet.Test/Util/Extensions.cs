@@ -28,7 +28,7 @@ static class Extensions {
     /// <summary>
     /// Strips time from the date structure
     /// </summary>
-    public static DateTime RoundToDay(this DateTime time) {
+    public static DateTime FloorToDay(this DateTime time) {
         return new DateTime(time.Year, time.Month, time.Day);
     }
 
@@ -37,7 +37,7 @@ static class Extensions {
     /// </summary>
     /// <param name="time"></param>
     /// <returns></returns>
-    public static DateTime RoundToSecond(this DateTime time) {
+    public static DateTime FloorToSecond(this DateTime time) {
         return new DateTime(time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, time.Kind);
     }
 
@@ -46,7 +46,7 @@ static class Extensions {
     /// </summary>
     /// <param name="time"></param>
     /// <returns></returns>
-    public static DateTime RoundToMillisecond(this DateTime time) {
+    public static DateTime FloorToMillisecond(this DateTime time) {
         return new DateTime(time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, time.Millisecond, time.Kind);
     }
 
@@ -56,7 +56,7 @@ static class Extensions {
     /// </summary>
     /// <param name="time"></param>
     /// <returns></returns>
-    public static DateTime RoundToMicrosecond(this DateTime time) {
+    public static DateTime FloorToMicrosecond(this DateTime time) {
         return new DateTime(time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, time.Millisecond, time.Microsecond, time.Kind);
     }
 #endif
