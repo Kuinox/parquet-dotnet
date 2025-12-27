@@ -958,21 +958,21 @@ namespace Parquet.Encodings {
                             for(int i = 0; i < longsRead; i++) {
                                 if(tse.LogicalType.TIMESTAMP.Unit.MILLIS is not null) {
                                     DateTime dt = longs[i].AsUnixMillisecondsInDateTime();
-                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Local);
+                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Unspecified);
                                     data[i] = dt;
                                 } else if(tse.LogicalType.TIMESTAMP.Unit.MICROS is not null) {
                                     long lv = longs[i];
                                     long microseconds = lv % 1000;
                                     lv /= 1000;
                                     DateTime dt = lv.AsUnixMillisecondsInDateTime().AddTicks(microseconds * 10);
-                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Local);
+                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Unspecified);
                                     data[i] = dt;
                                 } else if(tse.LogicalType.TIMESTAMP.Unit.NANOS is not null) {
                                     long lv = longs[i];
                                     long nanoseconds = lv % 1000000;
                                     lv /= 1000000;
                                     DateTime dt = lv.AsUnixMillisecondsInDateTime().AddTicks(nanoseconds / 100); // 1 tick = 100 nanoseconds
-                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Local);
+                                    dt = DateTime.SpecifyKind(dt, tse.LogicalType.TIMESTAMP.IsAdjustedToUTC ? DateTimeKind.Utc : DateTimeKind.Unspecified);
                                     data[i] = dt;
                                 } else {
                                     throw new ParquetException($"Unexpected TimeUnit: {tse.LogicalType.TIMESTAMP.Unit}");
