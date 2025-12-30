@@ -6,10 +6,6 @@ namespace Parquet.PerfRunner.Taxis;
 
 class TaxiDatasetLoader {
 
-    public static TaxiDatasetLoader Instance { get; } = new TaxiDatasetLoader();
-    TaxiDatasetLoader() {}
-
-
     // Official NYC TLC parquet. The "tripdata" dataset is a single month; "tripdata-large" combines multiple months.
     private const string _baseUrl = "https://d37ci6vzurychx.cloudfront.net/trip-data/";
     private static readonly HttpClient _httpClient = new();
@@ -22,7 +18,7 @@ class TaxiDatasetLoader {
 
     static readonly string _dataFolder = Path.Combine(Path.GetTempPath(), "nyc_tlc_data");
 
-    public async Task<TaxiDataset> LoadAsync(string datasetName) {
+    public async static Task<TaxiDataset> LoadAsync(string datasetName) {
         Directory.CreateDirectory(_dataFolder);
 
         if(!DatasetFiles.TryGetValue(datasetName, out string[]? files)) {

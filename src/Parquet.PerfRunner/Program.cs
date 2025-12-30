@@ -19,6 +19,9 @@ switch(benchName) {
     case "progression":
         BenchmarkRunner.Run<VersionedBenchmark>();
         break;
+    case "parallel":
+        BenchmarkRunner.Run<ParallelWriteBenchmark>();
+        break;
     case "sharp-compare-taxi":
         BenchmarkRunner.Run<ParquetSharpComparisonBenchmark>();
         break;

@@ -35,7 +35,7 @@ public class ParquetSharpComparisonBenchmark {
 
     [GlobalSetup]
     public async Task LoadDatasetAsync() {
-        _dataset = await TaxiDatasetLoader.Instance.LoadAsync(Dataset);
+        _dataset = await TaxiDatasetLoader.LoadAsync(Dataset);
         if(Schema == "small") {
             _parquetNetSchema = TaxiSchema.Small(_dataset);
             _parquetSharpSchema = ParquetSharpTaxiSchema.Small();
