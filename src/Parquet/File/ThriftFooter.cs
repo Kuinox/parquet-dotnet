@@ -160,11 +160,9 @@ namespace Parquet.File {
             return chunk;
         }
 
-        public static PageHeader CreateDataPage(int valueCount, bool isDictionary, bool isDeltaEncodable, Statistics statistics) {
+        public static PageHeader CreateDataPage(int valueCount, Encoding dataEncoding, Statistics statistics) {
             var dph = new DataPageHeader {
-                Encoding = isDictionary
-                        ? Encoding.PLAIN_DICTIONARY
-                        : isDeltaEncodable ? Encoding.DELTA_BINARY_PACKED : Encoding.PLAIN,
+                Encoding = dataEncoding,
                 DefinitionLevelEncoding = Encoding.RLE,
                 RepetitionLevelEncoding = Encoding.RLE,
                 NumValues = valueCount,

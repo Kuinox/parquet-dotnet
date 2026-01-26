@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
 using Parquet.Data;
@@ -29,14 +30,22 @@ namespace Parquet.Encodings {
         /// <param name="count">Number of elements to check</param>
         /// <returns>True if the data can be delta encoded, false otherwise</returns>
         public static bool CanEncode(Array data, int offset, int count) {
-            if (count == 0) return true;
+            System.Type elementType = data.GetType().GetElementType() ?? data.GetType();
 
-            // Fast path for ulong overflow check
             if (data.GetType() == typeof(ulong[])) {
-                return CanEncodeULongArray((ulong[])data, offset, count);
+                return count == 0 || CanEncodeULongArray((ulong[])data, offset, count);
             }
 
-            return IsSupported(data.GetType().GetElementType() ?? data.GetType());
+            return IsSupported(elementType);
+        }
+
+        public static bool CanEncode(Array data, int offset, int count, SchemaElement? tse) {
+            System.Type? elementType = data.GetType().GetElementType();
+            if(elementType == typeof(DateTime)) {
+                return tse?.Type == Meta.Type.INT32 || tse?.Type == Meta.Type.INT64;
+            }
+
+            return CanEncode(data, offset, count);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -108,6 +117,18 @@ namespace Parquet.Encodings {
             }
         }
 
+        public static void Encode(Array data, int offset, int count, Stream destination, SchemaElement? tse, DataColumnStatistics? stats = null) {
+            if(data is DateTime[] dateTimes) {
+                if(tse == null) {
+                    throw new NotSupportedException("schema element is required to encode DateTime with DELTA_BINARY_PACKED");
+                }
+                EncodeDateTime(dateTimes.AsSpan(offset, count), tse, destination, stats);
+                return;
+            }
+
+            Encode(data, offset, count, destination, stats);
+        }
+
 
 
 
@@ -145,6 +166,162 @@ namespace Parquet.Encodings {
             }
 
             throw new NotSupportedException($"element type {elementType} is not supported in {Encoding.DELTA_BINARY_PACKED}");
+        }
+
+        public static int Decode(Span<byte> s, Array dest, int destOffset, int valueCount, SchemaElement? tse, out int consumedBytes) {
+            if (s.Length == 0 && valueCount == 0) {
+                consumedBytes = 0;
+                return 0;
+            }
+
+            System.Type? elementType = dest.GetType().GetElementType();
+            if (elementType == null) {
+                throw new NotSupportedException($"element type {elementType} is not supported");
+            }
+
+            if(elementType == typeof(DateTime)) {
+                if(tse == null) {
+                    throw new NotSupportedException("schema element is required to decode DateTime with DELTA_BINARY_PACKED");
+                }
+                return DecodeDateTime(s, (DateTime[])dest, destOffset, valueCount, tse, out consumedBytes);
+            }
+
+            return Decode(s, dest, destOffset, valueCount, out consumedBytes);
+        }
+
+        private static void EncodeDateTime(ReadOnlySpan<DateTime> data, SchemaElement tse, Stream destination, DataColumnStatistics? stats) {
+            if(stats != null) {
+                ParquetPlainEncoder.FillStats(data, stats);
+            }
+
+            if(tse.Type == Meta.Type.INT32) {
+                if(data.Length == 0) {
+                    Encode(Array.Empty<int>(), 0, 0, destination, null);
+                    return;
+                }
+
+                int[] rented = ArrayPool<int>.Shared.Rent(data.Length);
+                try {
+                    for(int i = 0; i < data.Length; i++) {
+                        rented[i] = data[i].ToUnixDays();
+                    }
+                    Encode(rented, 0, data.Length, destination, null);
+                } finally {
+                    ArrayPool<int>.Shared.Return(rented);
+                }
+                return;
+            }
+
+            if(tse.Type != Meta.Type.INT64) {
+                throw new ParquetException($"cannot delta encode DateTime with physical type {tse.Type}");
+            }
+
+            if(data.Length == 0) {
+                Encode(Array.Empty<long>(), 0, 0, destination, null);
+                return;
+            }
+
+            long[] rentedLongs = ArrayPool<long>.Shared.Rent(data.Length);
+            try {
+                if(tse.LogicalType?.TIMESTAMP is not null) {
+                    bool adjustToUtc = tse.LogicalType.TIMESTAMP.IsAdjustedToUTC;
+                    for(int i = 0; i < data.Length; i++) {
+                        DateTime dt = adjustToUtc ? data[i].ToUtc() : data[i];
+                        if(tse.LogicalType.TIMESTAMP.Unit.MILLIS is not null) {
+                            rentedLongs[i] = dt.ToUnixMilliseconds();
+#if NET7_0_OR_GREATER
+                        } else if(tse.LogicalType.TIMESTAMP.Unit.MICROS is not null) {
+                            rentedLongs[i] = dt.ToUnixMicroseconds();
+                        } else if(tse.LogicalType.TIMESTAMP.Unit.NANOS is not null) {
+                            rentedLongs[i] = dt.ToUnixNanoseconds();
+#endif
+                        } else {
+                            throw new ParquetException($"Unexpected TimeUnit: {tse.LogicalType.TIMESTAMP.Unit}");
+                        }
+                    }
+                } else if(tse.ConvertedType == ConvertedType.TIMESTAMP_MILLIS) {
+                    for(int i = 0; i < data.Length; i++) {
+                        rentedLongs[i] = data[i].ToUtc().ToUnixMilliseconds();
+                    }
+#if NET7_0_OR_GREATER
+                } else if(tse.ConvertedType == ConvertedType.TIMESTAMP_MICROS) {
+                    for(int i = 0; i < data.Length; i++) {
+                        rentedLongs[i] = data[i].ToUtc().ToUnixMicroseconds();
+                    }
+#endif
+                } else {
+                    throw new ArgumentException($"invalid converted type: {tse.ConvertedType}");
+                }
+
+                Encode(rentedLongs, 0, data.Length, destination, null);
+            } finally {
+                ArrayPool<long>.Shared.Return(rentedLongs);
+            }
+        }
+
+        private static int DecodeDateTime(Span<byte> s, DateTime[] dest, int destOffset, int valueCount, SchemaElement tse, out int consumedBytes) {
+            if(tse.Type == Meta.Type.INT32) {
+                int[] rented = ArrayPool<int>.Shared.Rent(valueCount);
+                try {
+                    int read = Decode(s, rented, 0, valueCount, out consumedBytes);
+                    for(int i = 0; i < read; i++) {
+                        dest[destOffset + i] = rented[i].AsUnixDaysInDateTime();
+                    }
+                    return read;
+                } finally {
+                    ArrayPool<int>.Shared.Return(rented);
+                }
+            }
+
+            if(tse.Type != Meta.Type.INT64) {
+                throw new ParquetException($"cannot delta decode DateTime with physical type {tse.Type}");
+            }
+
+            long[] rentedLongs = ArrayPool<long>.Shared.Rent(valueCount);
+            try {
+                int read = Decode(s, rentedLongs, 0, valueCount, out consumedBytes);
+                if(tse.LogicalType?.TIMESTAMP is not null) {
+                    bool adjustedToUtc = tse.LogicalType.TIMESTAMP.IsAdjustedToUTC;
+                    for(int i = 0; i < read; i++) {
+                        if(tse.LogicalType.TIMESTAMP.Unit.MILLIS is not null) {
+                            DateTime dt = rentedLongs[i].AsUnixMillisecondsInDateTime();
+                            DateTimeKind kind = adjustedToUtc ? DateTimeKind.Utc : DateTimeKind.Local;
+                            dest[destOffset + i] = DateTime.SpecifyKind(dt, kind);
+                        } else if(tse.LogicalType.TIMESTAMP.Unit.MICROS is not null) {
+                            long lv = rentedLongs[i];
+                            long microseconds = lv % 1000;
+                            lv /= 1000;
+                            DateTime dt = lv.AsUnixMillisecondsInDateTime().AddTicks(microseconds * 10);
+                            DateTimeKind kind = adjustedToUtc ? DateTimeKind.Utc : DateTimeKind.Unspecified;
+                            dest[destOffset + i] = DateTime.SpecifyKind(dt, kind);
+                        } else if(tse.LogicalType.TIMESTAMP.Unit.NANOS is not null) {
+                            long lv = rentedLongs[i];
+                            long nanoseconds = lv % 1000000;
+                            lv /= 1000000;
+                            DateTime dt = lv.AsUnixMillisecondsInDateTime().AddTicks(nanoseconds / 100);
+                            DateTimeKind kind = adjustedToUtc ? DateTimeKind.Utc : DateTimeKind.Unspecified;
+                            dest[destOffset + i] = DateTime.SpecifyKind(dt, kind);
+                        } else {
+                            throw new ParquetException($"Unexpected TimeUnit: {tse.LogicalType.TIMESTAMP.Unit}");
+                        }
+                    }
+                } else if(tse.ConvertedType == ConvertedType.TIMESTAMP_MICROS) {
+                    for(int i = 0; i < read; i++) {
+                        long lv = rentedLongs[i];
+                        long microseconds = lv % 1000;
+                        lv /= 1000;
+                        dest[destOffset + i] = lv.AsUnixMillisecondsInDateTime().AddTicks(microseconds * 10);
+                    }
+                } else {
+                    for(int i = 0; i < read; i++) {
+                        dest[destOffset + i] = rentedLongs[i].AsUnixMillisecondsInDateTime();
+                    }
+                }
+
+                return read;
+            } finally {
+                ArrayPool<long>.Shared.Return(rentedLongs);
+            }
         }
 
 

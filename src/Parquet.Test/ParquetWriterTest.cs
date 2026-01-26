@@ -426,6 +426,60 @@ namespace Parquet.Test {
         }
 
         [Fact]
+        public async Task Column_encoding_options_override_delta() {
+            var ms = new MemoryStream();
+            var id = new DataField<int>("id") {
+                EncodingOptions = new ColumnEncodingOptions { UseDeltaBinaryPackedEncoding = false }
+            };
+
+            //write
+            await using(ParquetWriter writer = await ParquetWriter.CreateAsync(new ParquetSchema(id), ms)) {
+                using(ParquetRowGroupWriter rg = writer.CreateRowGroup()) {
+                    await rg.WriteColumnAsync(new DataColumn(id, new[] { 1, 2, 3, 4 }));
+                }
+            }
+
+            //read back
+            ms.Position = 0;
+            using(ParquetReader reader = await ParquetReader.CreateAsync(ms)) {
+                ParquetRowGroupReader rgr = reader.OpenRowGroupReader(0);
+                Meta.ColumnChunk? cc = rgr.GetMetadata(id);
+                Assert.NotNull(cc);
+                Assert.Contains(Parquet.Meta.Encoding.PLAIN, cc.MetaData!.Encodings);
+            }
+        }
+
+        [Fact]
+        public async Task Default_datetime_is_delta_binary_packed() {
+            var ms = new MemoryStream();
+            var ts = new DateTimeDataField("ts", DateTimeFormat.DateAndTime);
+            DateTime[] data = new[] {
+                DateTime.SpecifyKind(new DateTime(2024, 1, 1, 0, 0, 0), DateTimeKind.Utc),
+                DateTime.SpecifyKind(new DateTime(2024, 1, 1, 0, 0, 1), DateTimeKind.Utc),
+                DateTime.SpecifyKind(new DateTime(2024, 1, 1, 0, 0, 2), DateTimeKind.Utc)
+            };
+
+            //write
+            await using(ParquetWriter writer = await ParquetWriter.CreateAsync(new ParquetSchema(ts), ms)) {
+                using(ParquetRowGroupWriter rg = writer.CreateRowGroup()) {
+                    await rg.WriteColumnAsync(new DataColumn(ts, data));
+                }
+            }
+
+            //read back
+            ms.Position = 0;
+            using(ParquetReader reader = await ParquetReader.CreateAsync(ms)) {
+                ParquetRowGroupReader rgr = reader.OpenRowGroupReader(0);
+                Meta.ColumnChunk? cc = rgr.GetMetadata(ts);
+                Assert.NotNull(cc);
+                Assert.Contains(Parquet.Meta.Encoding.DELTA_BINARY_PACKED, cc.MetaData!.Encodings);
+
+                DataColumn dc = await rgr.ReadColumnAsync(ts);
+                Assert.Equal(data, dc.Data);
+            }
+        }
+
+        [Fact]
         public async Task Cannot_write_more_columns_than_schema() {
             var schema = new ParquetSchema(new DataField<int>("id"));
 

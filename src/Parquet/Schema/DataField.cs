@@ -59,6 +59,11 @@ namespace Parquet.Schema {
         public int FieldId { get => _fieldId; set => _fieldId = value; }
 
         /// <summary>
+        /// Optional per-column encoding overrides. Null values inherit <see cref="ParquetOptions"/> defaults.
+        /// </summary>
+        public ColumnEncodingOptions? EncodingOptions { get; set; }
+
+        /// <summary>
         /// Creates a new instance of <see cref="DataField"/> by name and CLR type.
         /// </summary>
         /// <param name="name">Field name</param>

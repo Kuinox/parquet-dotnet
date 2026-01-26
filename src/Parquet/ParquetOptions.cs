@@ -53,7 +53,8 @@ namespace Parquet {
         public double DictionaryEncodingThreshold { get; set; } = 0.8;
 
         /// <summary>
-        /// When set, the default encoding for INT32 and INT64 is <see cref="Parquet.Meta.Encoding.DELTA_BINARY_PACKED"/>, otherwise
+        /// When set, the default encoding for INT32/INT64 (including DateTime columns backed by INT32/INT64) is
+        /// <see cref="Parquet.Meta.Encoding.DELTA_BINARY_PACKED"/>, otherwise
         /// it's reverted to <see cref="Parquet.Meta.Encoding.PLAIN"/>. You should only set this to <see langword="false"/> if
         /// your readers do not understand it.
         /// </summary>

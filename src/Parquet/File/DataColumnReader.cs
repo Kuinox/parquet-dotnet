@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.IO;
+using Parquet;
 using Parquet.Data;
 using Parquet.Encodings;
 using Parquet.Extensions;
@@ -298,7 +299,7 @@ namespace Parquet.File {
 
                 case Encoding.DELTA_BINARY_PACKED: {// 5
                         Array plainData = pc.GetPlainDataToReadInto(out int offset);
-                        int read = DeltaBinaryPackedEncoder.Decode(src, plainData, offset, totalValuesInPage, out _);
+                        int read = DeltaBinaryPackedEncoder.Decode(src, plainData, offset, totalValuesInPage, _schemaElement, out _);
                         pc.MarkUsefulPlainData(read);
                     }
                     break;
@@ -350,5 +351,6 @@ namespace Parquet.File {
 
             return destOffset - start;
         }
+
     }
 }

@@ -90,6 +90,11 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
 
         var r = new ColumnMetrics();
 
+        ColumnEncodingOptions? encodingOptions = column.Field.EncodingOptions;
+        bool useDictionaryEncoding = encodingOptions?.UseDictionaryEncoding ?? options.UseDictionaryEncoding;
+        double dictionaryThreshold = encodingOptions?.DictionaryEncodingThreshold ?? options.DictionaryEncodingThreshold;
+        bool useDeltaBinaryPackedEncoding = encodingOptions?.UseDeltaBinaryPackedEncoding ?? options.UseDeltaBinaryPackedEncoding;
+
         /*
          * Page header must preceeed actual data (compressed or not) however it contains both
          * the uncompressed and compressed data size which we don't know! This somehow limits
@@ -97,7 +102,7 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
          */
 
         using var pc = new PackedColumn(column);
-        pc.Pack(options.UseDictionaryEncoding, options.DictionaryEncodingThreshold);
+        pc.Pack(useDictionaryEncoding, dictionaryThreshold);
 
         // dictionary page
         (CompressResult dictCompressResult, MemoryStream ms)? dictWriteState = null;
@@ -119,7 +124,7 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
             // data page
             using(MemoryStream ms = _rmsMgr.GetStream()) {
                 Array data = pc.GetPlainData(out int offset, out int count);
-                bool deltaEncode = column.IsDeltaEncodable && options.UseDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count);
+                bool deltaEncode = useDeltaBinaryPackedEncoding && DeltaBinaryPackedEncoder.CanEncode(data, offset, count, tse);
 
 
                 if(pc.HasRepetitionLevels) {
@@ -137,7 +142,7 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
                     RleBitpackedHybridEncoder.Encode(ms, indexes.AsSpan(0, indexesLength), bitWidth);
                 } else {
                     if(deltaEncode) {
-                        DeltaBinaryPackedEncoder.Encode(data, offset, count, ms, column.Statistics);
+                        DeltaBinaryPackedEncoder.Encode(data, offset, count, ms, tse, column.Statistics);
                     } else {
                         ParquetPlainEncoder.Encode(data, offset, count, tse, ms, pc.HasDictionary ? null : column.Statistics);
                     }
@@ -146,7 +151,10 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
                 Statistics statistics = column.Statistics.ToThriftStatistics(tse);
 
                 // data page Num_values also does include NULLs
-                PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, pc.HasDictionary, deltaEncode, statistics);
+                Encoding dataEncoding = pc.HasDictionary
+                    ? Encoding.PLAIN_DICTIONARY
+                    : deltaEncode ? Encoding.DELTA_BINARY_PACKED : Encoding.PLAIN;
+                PageHeader ph = ThriftFooter.CreateDataPage(column.NumValues, dataEncoding, statistics);
                 r = r.WithAddedPage(ph);
 
                 CompressResult result = await CompressAsync(ph, ms, compressionMethod, compressionLevel, cancellationToken);
@@ -177,7 +185,6 @@ OrderedCommitGate orderedCommitGate, CancellationToken cancellationToken = defau
 
         return r;
     }
-
 
     private static void WriteLevels(Stream s, Span<int> levels, int count, int maxValue) {
         int bitWidth = maxValue.GetBitWidth();
