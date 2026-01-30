@@ -6,8 +6,8 @@
         <PackageId>Parquet.Net</PackageId>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-        <WarningsAsErrors />
+        <!-- disabled because of submodules fuckeries <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <WarningsAsErrors />-->
         <DocumentationFile>bin\Debug\$(TargetFramework)\Parquet.xml</DocumentationFile>
         <DebugType>full</DebugType>
         <DebugSymbols>true</DebugSymbols>
