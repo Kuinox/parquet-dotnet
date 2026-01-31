@@ -2,6 +2,7 @@
 <#@ assembly name="System.Core" #>
 <#@ import namespace="System.Collections.Generic" #>
 <#@ output extension=".cs" #>
+// NOTE: This file is auto-generated from BitPackedEncoder.tt
 <#
     var types = new[] { "int", "long" };
     var maxWidths = new[] { sizeof(int) * 8, sizeof(long) * 8 };
@@ -60,6 +61,7 @@
 #>
 namespace Parquet.Encodings {
     using System;
+    using System.Buffers;
 
     static partial class BitPackedEncoder {
 
@@ -77,31 +79,25 @@ namespace Parquet.Encodings {
         /// </summary>
         /// <returns>Number of bytes written</returns>
         public static int Encode8Values<#= ed #>(Span<<#= nt #>> src, Span<byte> dest, int bitWidth) {
-
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<<#= nt #>> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new <#= nt #>[8];
-                src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(dest.Length >= bitWidth) {
+                Pack8Values<#= ed #>(src, dest, bitWidth);
+                return bitWidth;
             }
 
-            Pack8Values<#= ed #>(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
-                for(int i = 0; i < bitWidth && i < dest.Length; i++) {
-                    dest[i] = dest1[i];
+            // Need temp buffers - rent from pool
+            <#= nt #>[] srcRented = ArrayPool<<#= nt #>>.Shared.Rent(8);
+            byte[] destRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            try {
+                src.CopyTo(srcRented);
+                Pack8Values<#= ed #>(srcRented, destRented, bitWidth);
+                for(int i = 0; i < dest.Length; i++) {
+                    dest[i] = destRented[i];
                 }
+                return dest.Length;
+            } finally {
+                ArrayPool<<#= nt #>>.Shared.Return(srcRented);
+                ArrayPool<byte>.Shared.Return(destRented);
             }
-
-            return written;
         }
     
 
@@ -120,32 +116,26 @@ namespace Parquet.Encodings {
         /// </summary>
         /// <returns>Number of values unpacked</returns>
         public static int Decode8Values<#= ed #>(Span<byte> src, Span<<#= nt #>> dest, int bitWidth) {
-
-            // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<<#= nt #>> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
-                src.CopyTo(src1);
-                dest1 = new <#= nt #>[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(src.Length >= bitWidth && dest.Length >= 8) {
+                Unpack8Values<#= ed #>(src, dest, bitWidth);
+                return 8;
             }
 
-            Unpack8Values<#= ed #>(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+            // Need temp buffers - rent from pool
+            byte[] srcRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            <#= nt #>[] destRented = ArrayPool<<#= nt #>>.Shared.Rent(8);
+            try {
+                src.CopyTo(srcRented);
+                Unpack8Values<#= ed #>(srcRented, destRented, bitWidth);
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
                 for(int i = 0; i < decoded; i++) {
-                    dest[i] = dest1[i];
+                    dest[i] = destRented[i];
                 }
+                return decoded;
+            } finally {
+                ArrayPool<byte>.Shared.Return(srcRented);
+                ArrayPool<<#= nt #>>.Shared.Return(destRented);
             }
-
-            return decoded;
         }
 
         /// <summary>

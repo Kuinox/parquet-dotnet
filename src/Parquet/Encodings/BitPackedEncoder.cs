@@ -1,5 +1,7 @@
-﻿namespace Parquet.Encodings {
+﻿// NOTE: This file is auto-generated from BitPackedEncoder.tt
+namespace Parquet.Encodings {
     using System;
+    using System.Buffers;
 
     static partial class BitPackedEncoder {
 
@@ -10,31 +12,25 @@
         /// </summary>
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesLE(Span<int> src, Span<byte> dest, int bitWidth) {
-
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<int> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new int[8];
-                src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(dest.Length >= bitWidth) {
+                Pack8ValuesLE(src, dest, bitWidth);
+                return bitWidth;
             }
 
-            Pack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
-                for(int i = 0; i < bitWidth && i < dest.Length; i++) {
-                    dest[i] = dest1[i];
+            // Need temp buffers - rent from pool
+            int[] srcRented = ArrayPool<int>.Shared.Rent(8);
+            byte[] destRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            try {
+                src.CopyTo(srcRented);
+                Pack8ValuesLE(srcRented, destRented, bitWidth);
+                for(int i = 0; i < dest.Length; i++) {
+                    dest[i] = destRented[i];
                 }
+                return dest.Length;
+            } finally {
+                ArrayPool<int>.Shared.Return(srcRented);
+                ArrayPool<byte>.Shared.Return(destRented);
             }
-
-            return written;
         }
     
 
@@ -115,32 +111,26 @@
         /// </summary>
         /// <returns>Number of values unpacked</returns>
         public static int Decode8ValuesLE(Span<byte> src, Span<int> dest, int bitWidth) {
-
-            // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<int> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
-                src.CopyTo(src1);
-                dest1 = new int[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(src.Length >= bitWidth && dest.Length >= 8) {
+                Unpack8ValuesLE(src, dest, bitWidth);
+                return 8;
             }
 
-            Unpack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+            // Need temp buffers - rent from pool
+            byte[] srcRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            int[] destRented = ArrayPool<int>.Shared.Rent(8);
+            try {
+                src.CopyTo(srcRented);
+                Unpack8ValuesLE(srcRented, destRented, bitWidth);
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
                 for(int i = 0; i < decoded; i++) {
-                    dest[i] = dest1[i];
+                    dest[i] = destRented[i];
                 }
+                return decoded;
+            } finally {
+                ArrayPool<byte>.Shared.Return(srcRented);
+                ArrayPool<int>.Shared.Return(destRented);
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -221,31 +211,24 @@
         /// </summary>
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesBE(Span<int> src, Span<byte> dest, int bitWidth) {
-
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<int> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new int[8];
-                src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(dest.Length >= bitWidth) {
+                Pack8ValuesBE(src, dest, bitWidth);
+                return bitWidth;
             }
 
-            Pack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
-                for(int i = 0; i < bitWidth && i < dest.Length; i++) {
-                    dest[i] = dest1[i];
+            int[] srcRented = ArrayPool<int>.Shared.Rent(8);
+            byte[] destRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            try {
+                src.CopyTo(srcRented);
+                Pack8ValuesBE(srcRented, destRented, bitWidth);
+                for(int i = 0; i < dest.Length; i++) {
+                    dest[i] = destRented[i];
                 }
+                return dest.Length;
+            } finally {
+                ArrayPool<int>.Shared.Return(srcRented);
+                ArrayPool<byte>.Shared.Return(destRented);
             }
-
-            return written;
         }
     
 
@@ -326,32 +309,25 @@
         /// </summary>
         /// <returns>Number of values unpacked</returns>
         public static int Decode8ValuesBE(Span<byte> src, Span<int> dest, int bitWidth) {
-
-            // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<int> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
-                src.CopyTo(src1);
-                dest1 = new int[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(src.Length >= bitWidth && dest.Length >= 8) {
+                Unpack8ValuesBE(src, dest, bitWidth);
+                return 8;
             }
 
-            Unpack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+            byte[] srcRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            int[] destRented = ArrayPool<int>.Shared.Rent(8);
+            try {
+                src.CopyTo(srcRented);
+                Unpack8ValuesBE(srcRented, destRented, bitWidth);
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
                 for(int i = 0; i < decoded; i++) {
-                    dest[i] = dest1[i];
+                    dest[i] = destRented[i];
                 }
+                return decoded;
+            } finally {
+                ArrayPool<byte>.Shared.Return(srcRented);
+                ArrayPool<int>.Shared.Return(destRented);
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -432,31 +408,24 @@
         /// </summary>
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesLE(Span<long> src, Span<byte> dest, int bitWidth) {
-
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<long> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new long[8];
-                src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(dest.Length >= bitWidth) {
+                Pack8ValuesLE(src, dest, bitWidth);
+                return bitWidth;
             }
 
-            Pack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
-                for(int i = 0; i < bitWidth && i < dest.Length; i++) {
-                    dest[i] = dest1[i];
+            long[] srcRented = ArrayPool<long>.Shared.Rent(8);
+            byte[] destRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            try {
+                src.CopyTo(srcRented);
+                Pack8ValuesLE(srcRented, destRented, bitWidth);
+                for(int i = 0; i < dest.Length; i++) {
+                    dest[i] = destRented[i];
                 }
+                return dest.Length;
+            } finally {
+                ArrayPool<long>.Shared.Return(srcRented);
+                ArrayPool<byte>.Shared.Return(destRented);
             }
-
-            return written;
         }
     
 
@@ -601,32 +570,26 @@
         /// </summary>
         /// <returns>Number of values unpacked</returns>
         public static int Decode8ValuesLE(Span<byte> src, Span<long> dest, int bitWidth) {
-
-            // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<long> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
-                src.CopyTo(src1);
-                dest1 = new long[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(src.Length >= bitWidth && dest.Length >= 8) {
+                Unpack8ValuesLE(src, dest, bitWidth);
+                return 8;
             }
 
-            Unpack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+            // Need temp buffers - rent from pool
+            byte[] srcRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            long[] destRented = ArrayPool<long>.Shared.Rent(8);
+            try {
+                src.CopyTo(srcRented);
+                Unpack8ValuesLE(srcRented, destRented, bitWidth);
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
                 for(int i = 0; i < decoded; i++) {
-                    dest[i] = dest1[i];
+                    dest[i] = destRented[i];
                 }
+                return decoded;
+            } finally {
+                ArrayPool<byte>.Shared.Return(srcRented);
+                ArrayPool<long>.Shared.Return(destRented);
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -771,31 +734,25 @@
         /// </summary>
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesBE(Span<long> src, Span<byte> dest, int bitWidth) {
-
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<long> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new long[8];
-                src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(dest.Length >= bitWidth) {
+                Pack8ValuesBE(src, dest, bitWidth);
+                return bitWidth;
             }
 
-            Pack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
-                for(int i = 0; i < bitWidth && i < dest.Length; i++) {
-                    dest[i] = dest1[i];
+            // Need temp buffers - rent from pool
+            long[] srcRented = ArrayPool<long>.Shared.Rent(8);
+            byte[] destRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            try {
+                src.CopyTo(srcRented);
+                Pack8ValuesBE(srcRented, destRented, bitWidth);
+                for(int i = 0; i < dest.Length; i++) {
+                    dest[i] = destRented[i];
                 }
+                return dest.Length;
+            } finally {
+                ArrayPool<long>.Shared.Return(srcRented);
+                ArrayPool<byte>.Shared.Return(destRented);
             }
-
-            return written;
         }
     
 
@@ -940,32 +897,26 @@
         /// </summary>
         /// <returns>Number of values unpacked</returns>
         public static int Decode8ValuesBE(Span<byte> src, Span<long> dest, int bitWidth) {
-
-            // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<long> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
-                src.CopyTo(src1);
-                dest1 = new long[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
+            if(src.Length >= bitWidth && dest.Length >= 8) {
+                Unpack8ValuesBE(src, dest, bitWidth);
+                return 8;
             }
 
-            Unpack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+            // Need temp buffers - rent from pool
+            byte[] srcRented = ArrayPool<byte>.Shared.Rent(bitWidth);
+            long[] destRented = ArrayPool<long>.Shared.Rent(8);
+            try {
+                src.CopyTo(srcRented);
+                Unpack8ValuesBE(srcRented, destRented, bitWidth);
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
                 for(int i = 0; i < decoded; i++) {
-                    dest[i] = dest1[i];
+                    dest[i] = destRented[i];
                 }
+                return decoded;
+            } finally {
+                ArrayPool<byte>.Shared.Return(srcRented);
+                ArrayPool<long>.Shared.Return(destRented);
             }
-
-            return decoded;
         }
 
         /// <summary>
