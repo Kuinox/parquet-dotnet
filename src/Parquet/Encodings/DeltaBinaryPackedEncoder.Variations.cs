@@ -1,5 +1,6 @@
 ﻿namespace Parquet.Encodings {
     using System;
+    using System.Buffers;
     using System.IO;
     using Parquet.Extensions;
 
@@ -34,6 +35,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<int> raw8 = stackalloc int[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -42,7 +44,6 @@
                 Span<short> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     // Convert to bit packing type for bit packing
@@ -53,7 +54,7 @@
                         raw8[j] = 0;
                     }
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -121,54 +122,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            int[] vbuf = new int[valuesPerMiniblock];
+            int[] vbuf = ArrayPool<int>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                short currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    short minDelta = (short)s.ReadZigZagVarLong(ref spos);
 
-            short currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                short minDelta = (short)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue = (short)(currentValue + minDelta);
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue = (short)(currentValue + minDelta);
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue = (short)(currentValue + minDelta + (short)vbuf[i]);
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue = (short)(currentValue + minDelta + (short)vbuf[i]);
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<int>.Shared.Return(vbuf);
+            }
         }
 
         private static void FlushUshortBlock(Span<ushort> block, ushort minDelta,
@@ -200,6 +204,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<int> raw8 = stackalloc int[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -208,7 +213,6 @@
                 Span<ushort> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     // Convert to bit packing type for bit packing
@@ -219,7 +223,7 @@
                         raw8[j] = 0;
                     }
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -287,54 +291,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            int[] vbuf = new int[valuesPerMiniblock];
+            int[] vbuf = ArrayPool<int>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                ushort currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    ushort minDelta = (ushort)s.ReadZigZagVarLong(ref spos);
 
-            ushort currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                ushort minDelta = (ushort)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue = (ushort)(currentValue + minDelta);
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue = (ushort)(currentValue + minDelta);
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue = (ushort)(currentValue + minDelta + (ushort)vbuf[i]);
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue = (ushort)(currentValue + minDelta + (ushort)vbuf[i]);
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<int>.Shared.Return(vbuf);
+            }
         }
 
         private static void FlushIntBlock(Span<int> block, int minDelta,
@@ -366,6 +373,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<int> raw8 = stackalloc int[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -374,12 +382,11 @@
                 Span<int> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     miniblockData.Slice(iv, count8).CopyTo(raw8);
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -447,54 +454,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            int[] vbuf = new int[valuesPerMiniblock];
+            int[] vbuf = ArrayPool<int>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                int currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    int minDelta = (int)s.ReadZigZagVarLong(ref spos);
 
-            int currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                int minDelta = (int)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue += minDelta;
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue += minDelta;
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue += minDelta + vbuf[i];
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue += minDelta + vbuf[i];
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<int>.Shared.Return(vbuf);
+            }
         }
 
         private static void FlushUintBlock(Span<uint> block, uint minDelta,
@@ -526,6 +536,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<long> raw8 = stackalloc long[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -534,7 +545,6 @@
                 Span<uint> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     // Convert to bit packing type for bit packing
@@ -545,7 +555,7 @@
                         raw8[j] = 0;
                     }
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -613,54 +623,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            long[] vbuf = new long[valuesPerMiniblock];
+            long[] vbuf = ArrayPool<long>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                uint currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    uint minDelta = (uint)s.ReadZigZagVarLong(ref spos);
 
-            uint currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                uint minDelta = (uint)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue += minDelta;
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue += minDelta;
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue += (uint)(minDelta + (uint)vbuf[i]);
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue += (uint)(minDelta + (uint)vbuf[i]);
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<long>.Shared.Return(vbuf);
+            }
         }
 
         private static void FlushLongBlock(Span<long> block, long minDelta,
@@ -692,6 +705,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<long> raw8 = stackalloc long[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -700,12 +714,11 @@
                 Span<long> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     miniblockData.Slice(iv, count8).CopyTo(raw8);
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -773,54 +786,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            long[] vbuf = new long[valuesPerMiniblock];
+            long[] vbuf = ArrayPool<long>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                long currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    long minDelta = (long)s.ReadZigZagVarLong(ref spos);
 
-            long currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                long minDelta = (long)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue += minDelta;
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue += minDelta;
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue += minDelta + vbuf[i];
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue += minDelta + vbuf[i];
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<long>.Shared.Return(vbuf);
+            }
         }
 
         private static void FlushUlongBlock(Span<ulong> block, ulong minDelta,
@@ -852,6 +868,7 @@
 
             // each miniblock is a list of bit packed ints according to the bit width stored at the begining of the block
             Span<long> raw8 = stackalloc long[8];
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -860,7 +877,6 @@
                 Span<ulong> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
                     // Convert to bit packing type for bit packing
@@ -871,7 +887,7 @@
                         raw8[j] = 0;
                     }
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -939,54 +955,57 @@
             }
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
-            long[] vbuf = new long[valuesPerMiniblock];
+            long[] vbuf = ArrayPool<long>.Shared.Rent(valuesPerMiniblock);
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                ulong currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    ulong minDelta = (ulong)s.ReadZigZagVarLong(ref spos);
 
-            ulong currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                ulong minDelta = (ulong)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
+                                currentValue += minDelta;
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
-                            currentValue += minDelta;
-                            dest[destOffset++] = currentValue;
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
+
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                                currentValue += (ulong)(minDelta + (ulong)vbuf[i]);
+                                dest[destOffset++] = currentValue;
+                            }
+
                         }
-                    } else {
-
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
-
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
-                            currentValue += (ulong)(minDelta + (ulong)vbuf[i]);
-                            dest[destOffset++] = currentValue;
-                        }
-
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+                ArrayPool<long>.Shared.Return(vbuf);
+            }
         }
     }
 }

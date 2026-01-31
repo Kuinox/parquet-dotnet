@@ -14,6 +14,7 @@
 #>
 namespace Parquet.Encodings {
     using System;
+    using System.Buffers;
     using System.IO;
     using Parquet.Extensions;
 
@@ -61,6 +62,7 @@ namespace Parquet.Encodings {
 <# } else { #>
             Span<<#=nt#>> raw8 = stackalloc <#=nt#>[8];
 <# } #>
+            Span<byte> encoded8 = stackalloc byte[64]; // max bitWidth is 64
             for(int i = 0; i < miniblockCount; i++) {
                 int offset = i * miniblockSize;
                 int count = Math.Min(miniblockSize, block.Length - offset);
@@ -69,7 +71,6 @@ namespace Parquet.Encodings {
                 Span<<#=nt#>> miniblockData = block.Slice(offset, count);
                 // write values in 8
                 int bitWidth = bitWidths[i];
-                byte[] encoded8 = new byte[bitWidth];
                 for(int iv = 0; iv < miniblockData.Length; iv += 8) {
                     int count8 = Math.Min(8, miniblockData.Length - iv);
 <# if (requiresConversion) { #>
@@ -84,7 +85,7 @@ namespace Parquet.Encodings {
                     miniblockData.Slice(iv, count8).CopyTo(raw8);
 <# } #>
                     BitPackedEncoder.Pack8ValuesLE(raw8, encoded8, bitWidth);
-                    destination.Write(encoded8, 0, bitWidth);
+                    destination.WriteSpan(encoded8.Slice(0, bitWidth));
                 }
             }
         }
@@ -157,67 +158,74 @@ namespace Parquet.Encodings {
 
             int valuesPerMiniblock = blockSizeInValues / miniblocksInABlock;
 <# if (requiresConversion) { #>
-            <#= bitPackingType#>[] vbuf = new <#= bitPackingType#>[valuesPerMiniblock];
+            <#= bitPackingType#>[] vbuf = ArrayPool<<#= bitPackingType#>>.Shared.Rent(valuesPerMiniblock);
 <# } else { #>
-            <#= nt#>[] vbuf = new <#= nt#>[valuesPerMiniblock];
+            <#= nt#>[] vbuf = ArrayPool<<#= nt#>>.Shared.Rent(valuesPerMiniblock);
 <# } #>
+            try {
+                // Each block contains
+                // <min delta> <list of bitwidths of miniblocks> <miniblocks>
 
-            // Each block contains
-            // <min delta> <list of bitwidths of miniblocks> <miniblocks>
+                <#= nt#> currentValue = firstValue;
+                int read = 1;
+                int destOffset = 0;
+                dest[destOffset++] = firstValue;
+                while(read < totalValueCount && spos < s.Length) {
+                    <#= nt#> minDelta = (<#= nt#>)s.ReadZigZagVarLong(ref spos);
 
-            <#= nt#> currentValue = firstValue;
-            int read = 1;
-            int destOffset = 0;
-            dest[destOffset++] = firstValue;
-            while(read < totalValueCount && spos < s.Length) {
-                <#= nt#> minDelta = (<#= nt#>)s.ReadZigZagVarLong(ref spos);
+                    Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
+                    spos += miniblocksInABlock;
+                    foreach(byte bitWidth in bitWidths) {
 
-                Span<byte> bitWidths = s.Slice(spos, Math.Min(miniblocksInABlock, s.Length - spos));
-                spos += miniblocksInABlock;
-                foreach(byte bitWidth in bitWidths) {
+                        // unpack miniblock
 
-                    // unpack miniblock
+                        if(read >= totalValueCount)
+                            break;
 
-                    if(read >= totalValueCount)
-                        break;
-
-                    if(bitWidth == 0) {
-                        // there's not data for bitwidth 0
-                        for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
-                            if(read >= totalValueCount)
-                                break;
+                        if(bitWidth == 0) {
+                            // there's not data for bitwidth 0
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length; i++, read++) {
+                                if(read >= totalValueCount)
+                                    break;
 <# if (requiresConversion && (nt == "short" || nt == "ushort")) { #>
-                            currentValue = (<#=nt#>)(currentValue + minDelta);
+                                currentValue = (<#=nt#>)(currentValue + minDelta);
 <# } else { #>
-                            currentValue += minDelta;
+                                currentValue += minDelta;
 <# } #>
-                            dest[destOffset++] = currentValue;
-                        }
-                    } else {
+                                dest[destOffset++] = currentValue;
+                            }
+                        } else {
 
-                        // mini block has a size of 8*n, unpack 8 values each time
-                        for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
-                            BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
-                            spos += bitWidth;
-                        }
+                            // mini block has a size of 8*n, unpack 8 values each time
+                            for(int j = 0; j < valuesPerMiniblock && spos < s.Length; j += 8) {
+                                BitPackedEncoder.Unpack8ValuesLE(s.Slice(Math.Min(spos, s.Length)), vbuf.AsSpan(j), bitWidth);
+                                spos += bitWidth;
+                            }
 
-                        for(int i = 0; i < vbuf.Length && destOffset < dest.Length && read < totalValueCount; i++, read++) {
+                            for(int i = 0; i < valuesPerMiniblock && destOffset < dest.Length && read < totalValueCount; i++, read++) {
 <# if (requiresConversion && (nt == "short" || nt == "ushort")) { #>
-                            currentValue = (<#=nt#>)(currentValue + minDelta + (<#=nt#>)vbuf[i]);
+                                currentValue = (<#=nt#>)(currentValue + minDelta + (<#=nt#>)vbuf[i]);
 <# } else if (requiresConversion) { #>
-                            currentValue += (<#=nt#>)(minDelta + (<#=nt#>)vbuf[i]);
+                                currentValue += (<#=nt#>)(minDelta + (<#=nt#>)vbuf[i]);
 <# } else { #>
-                            currentValue += minDelta + vbuf[i];
+                                currentValue += minDelta + vbuf[i];
 <# } #>
-                            dest[destOffset++] = currentValue;
-                        }
+                                dest[destOffset++] = currentValue;
+                            }
 
+                        }
                     }
                 }
-            }
 
-            consumedBytes = spos;
-            return read;
+                consumedBytes = spos;
+                return read;
+            } finally {
+<# if (requiresConversion) { #>
+                ArrayPool<<#= bitPackingType#>>.Shared.Return(vbuf);
+<# } else { #>
+                ArrayPool<<#= nt#>>.Shared.Return(vbuf);
+<# } #>
+            }
         }
 <# } #>
     }

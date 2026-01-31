@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Threading.Tasks;
 using CommunityToolkit.HighPerformance.Buffers;
 using K4os.Compression.LZ4;
+using Microsoft.IO;
 using Parquet.Extensions;
 using Snappier;
 
@@ -30,6 +31,7 @@ interface ICompressor {
 }
 
 class DefaultCompressor : ICompressor {
+    private static readonly RecyclableMemoryStreamManager _rmsMgr = new RecyclableMemoryStreamManager();
 
     // "None" (no compression) as conversion helper
 
@@ -63,7 +65,7 @@ class DefaultCompressor : ICompressor {
 
     private async ValueTask<IMemoryOwner<byte>> GzipCompress(MemoryStream source, CompressionLevel level) {
         // Compress into an in-memory stream and copy into MemoryOwner without extra temporary arrays
-        using var ms = new MemoryStream();
+        using var ms = _rmsMgr.GetStream();
         source.Position = 0;
         using (var gzip = new GZipStream(ms, level, leaveOpen: true)) {
             await source.CopyToAsync(gzip);
@@ -80,7 +82,7 @@ class DefaultCompressor : ICompressor {
     private async ValueTask<IMemoryOwner<byte>> GzipDecompress(Stream source, int destinationLength) {
         var owner = MemoryOwner<byte>.Allocate(destinationLength);
         int copied = 0;
-        using var ms = new MemoryStream();
+        using var ms = _rmsMgr.GetStream();
         await source.CopyToAsync(ms);
         ms.Position = 0;
         using(var gzip = new GZipStream(ms, CompressionMode.Decompress, leaveOpen: true)) {
@@ -88,7 +90,7 @@ class DefaultCompressor : ICompressor {
         }
 		if(copied < destinationLength) {
 			// IMPORTANT: .Slice() transfers ownership, so owner does not need to be disposed
-			owner = owner.Slice(0, copied); 
+			owner = owner.Slice(0, copied);
 		}
         return owner;
     }
@@ -107,7 +109,7 @@ class DefaultCompressor : ICompressor {
 
 #if !NETSTANDARD2_0
     private async ValueTask<IMemoryOwner<byte>> BrotliCompress(MemoryStream source, CompressionLevel level) {
-        using var ms = new MemoryStream();
+        using var ms = _rmsMgr.GetStream();
         source.Position = 0;
         using (BrotliStream? brotli = new BrotliStream(ms, level, leaveOpen: true)) {
             await source.CopyToAsync(brotli);
