@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Parquet.Extensions;
 
 namespace Parquet.Encodings {
@@ -219,10 +220,11 @@ namespace Parquet.Encodings {
                 case 3:
                     return (data[2] << 16) + (data[1] << 8) + data[0];
                 case 4:
-                    return BitConverter.ToInt32(data.ToArray(), 0);
+                    return MemoryMarshal.Read<int>(data);
                 default:
                     throw new IOException($"encountered byte width ({data.Length}) that requires more than 4 bytes.");
             }
         }
     }
 }
+

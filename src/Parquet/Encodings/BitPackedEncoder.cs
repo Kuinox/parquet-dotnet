@@ -11,30 +11,19 @@
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesLE(Span<int> src, Span<byte> dest, int bitWidth) {
 
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<int> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new int[8];
+            if(dest.Length < bitWidth) {
+                Span<int> src1 = stackalloc int[8];
                 src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Pack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
+                Span<byte> dest1 = stackalloc byte[bitWidth];
+                Pack8ValuesLE(src1, dest1, bitWidth);
                 for(int i = 0; i < bitWidth && i < dest.Length; i++) {
                     dest[i] = dest1[i];
                 }
+                return dest.Length;
+            } else {
+                Pack8ValuesLE(src, dest, bitWidth);
+                return bitWidth;
             }
-
-            return written;
         }
     
 
@@ -117,30 +106,20 @@
         public static int Decode8ValuesLE(Span<byte> src, Span<int> dest, int bitWidth) {
 
             // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<int> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
+            if (src.Length < bitWidth || dest.Length < 8) {
+                Span<byte> src1 = stackalloc byte[bitWidth];
                 src.CopyTo(src1);
-                dest1 = new int[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Unpack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+                Span<int> dest1 = stackalloc int[8];
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
+                Unpack8ValuesLE(src1, dest1, bitWidth);
                 for(int i = 0; i < decoded; i++) {
                     dest[i] = dest1[i];
                 }
+                return decoded;
+            } else {
+                Unpack8ValuesLE(src, dest, bitWidth);
+                return 8;
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -222,30 +201,19 @@
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesBE(Span<int> src, Span<byte> dest, int bitWidth) {
 
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<int> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new int[8];
+            if(dest.Length < bitWidth) {
+                Span<int> src1 = stackalloc int[8];
                 src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Pack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
+                Span<byte> dest1 = stackalloc byte[bitWidth];
+                Pack8ValuesBE(src1, dest1, bitWidth);
                 for(int i = 0; i < bitWidth && i < dest.Length; i++) {
                     dest[i] = dest1[i];
                 }
+                return dest.Length;
+            } else {
+                Pack8ValuesBE(src, dest, bitWidth);
+                return bitWidth;
             }
-
-            return written;
         }
     
 
@@ -328,30 +296,20 @@
         public static int Decode8ValuesBE(Span<byte> src, Span<int> dest, int bitWidth) {
 
             // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<int> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
+            if (src.Length < bitWidth || dest.Length < 8) {
+                Span<byte> src1 = stackalloc byte[bitWidth];
                 src.CopyTo(src1);
-                dest1 = new int[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Unpack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+                Span<int> dest1 = stackalloc int[8];
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
+                Unpack8ValuesBE(src1, dest1, bitWidth);
                 for(int i = 0; i < decoded; i++) {
                     dest[i] = dest1[i];
                 }
+                return decoded;
+            } else {
+                Unpack8ValuesBE(src, dest, bitWidth);
+                return 8;
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -433,30 +391,19 @@
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesLE(Span<long> src, Span<byte> dest, int bitWidth) {
 
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<long> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new long[8];
+            if(dest.Length < bitWidth) {
+                Span<long> src1 = stackalloc long[8];
                 src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Pack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
+                Span<byte> dest1 = stackalloc byte[bitWidth];
+                Pack8ValuesLE(src1, dest1, bitWidth);
                 for(int i = 0; i < bitWidth && i < dest.Length; i++) {
                     dest[i] = dest1[i];
                 }
+                return dest.Length;
+            } else {
+                Pack8ValuesLE(src, dest, bitWidth);
+                return bitWidth;
             }
-
-            return written;
         }
     
 
@@ -603,30 +550,20 @@
         public static int Decode8ValuesLE(Span<byte> src, Span<long> dest, int bitWidth) {
 
             // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<long> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
+            if (src.Length < bitWidth || dest.Length < 8) {
+                Span<byte> src1 = stackalloc byte[bitWidth];
                 src.CopyTo(src1);
-                dest1 = new long[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Unpack8ValuesLE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+                Span<long> dest1 = stackalloc long[8];
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
+                Unpack8ValuesLE(src1, dest1, bitWidth);
                 for(int i = 0; i < decoded; i++) {
                     dest[i] = dest1[i];
                 }
+                return decoded;
+            } else {
+                Unpack8ValuesLE(src, dest, bitWidth);
+                return 8;
             }
-
-            return decoded;
         }
 
         /// <summary>
@@ -772,30 +709,19 @@
         /// <returns>Number of bytes written</returns>
         public static int Encode8ValuesBE(Span<long> src, Span<byte> dest, int bitWidth) {
 
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<long> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new long[8];
+            if(dest.Length < bitWidth) {
+                Span<long> src1 = stackalloc long[8];
                 src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Pack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
+                Span<byte> dest1 = stackalloc byte[bitWidth];
+                Pack8ValuesBE(src1, dest1, bitWidth);
                 for(int i = 0; i < bitWidth && i < dest.Length; i++) {
                     dest[i] = dest1[i];
                 }
+                return dest.Length;
+            } else {
+                Pack8ValuesBE(src, dest, bitWidth);
+                return bitWidth;
             }
-
-            return written;
         }
     
 
@@ -942,30 +868,20 @@
         public static int Decode8ValuesBE(Span<byte> src, Span<long> dest, int bitWidth) {
 
             // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<long> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
+            if (src.Length < bitWidth || dest.Length < 8) {
+                Span<byte> src1 = stackalloc byte[bitWidth];
                 src.CopyTo(src1);
-                dest1 = new long[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Unpack8ValuesBE(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+                Span<long> dest1 = stackalloc long[8];
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
+                Unpack8ValuesBE(src1, dest1, bitWidth);
                 for(int i = 0; i < decoded; i++) {
                     dest[i] = dest1[i];
                 }
+                return decoded;
+            } else {
+                Unpack8ValuesBE(src, dest, bitWidth);
+                return 8;
             }
-
-            return decoded;
         }
 
         /// <summary>

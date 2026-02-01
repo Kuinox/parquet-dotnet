@@ -29,8 +29,14 @@ namespace Parquet.Extensions {
         }
 
         public static void WriteInt32(this Stream s, int value) {
+#if NETSTANDARD2_0
             byte[] tmp = BitConverter.GetBytes(value);
             s.Write(tmp, 0, sizeof(int));
+#else
+            Span<byte> tmp = stackalloc byte[sizeof(int)];
+            BitConverter.TryWriteBytes(tmp, value);
+            s.Write(tmp);
+#endif
         }
 
         public static Task WriteInt32Async(this Stream s, int value) {

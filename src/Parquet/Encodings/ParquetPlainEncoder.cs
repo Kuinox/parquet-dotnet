@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.IO;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -20,7 +21,6 @@ namespace Parquet.Encodings {
     static class ParquetPlainEncoder {
 
         private static readonly System.Text.Encoding E = System.Text.Encoding.UTF8;
-        private static readonly byte[] ZeroInt32 = BitConverter.GetBytes(0);
         private static readonly ArrayPool<byte> BytePool = ArrayPool<byte>.Shared;
 
         public static void Encode(
@@ -627,11 +627,12 @@ namespace Parquet.Encodings {
             switch(tse.Type) {
                 case TType.INT32:
                     double scaleFactor32 = Math.Pow(10, tse.Scale ?? 0);
+                    Span<byte> buf32 = stackalloc byte[sizeof(int)];
                     foreach(decimal d in data)
                         try {
                             int i = (int)(d * (decimal)scaleFactor32);
-                            byte[] b = BitConverter.GetBytes(i);
-                            destination.Write(b, 0, b.Length);
+                            BinaryPrimitives.WriteInt32LittleEndian(buf32, i);
+                            destination.WriteSpan(buf32);
                         } catch(OverflowException) {
                             throw new ParquetException(
                                $"value '{d}' is too large to fit into scale {tse.Scale} and precision {tse.Precision}");
@@ -639,11 +640,12 @@ namespace Parquet.Encodings {
                     break;
                 case TType.INT64:
                     double sf64 = Math.Pow(10, tse.Scale ?? 0);
+                    Span<byte> buf64 = stackalloc byte[sizeof(long)];
                     foreach(decimal d in data)
                         try {
                             long l = (long)(d * (decimal)sf64);
-                            byte[] b = BitConverter.GetBytes(l);
-                            destination.Write(b, 0, b.Length);
+                            BinaryPrimitives.WriteInt64LittleEndian(buf64, l);
+                            destination.WriteSpan(buf64);
                         } catch(OverflowException) {
                             throw new ParquetException(
                                $"value '{d}' is too large to fit into scale {tse.Scale} and precision {tse.Precision}");
@@ -806,17 +808,19 @@ namespace Parquet.Encodings {
         }
 
         public static void Encode(ReadOnlySpan<byte[]> data, Stream destination) {
+            Span<byte> lenBuf = stackalloc byte[sizeof(int)];
             foreach(byte[] element in data) {
-                byte[] l = BitConverter.GetBytes(element.Length);
-                destination.Write(l, 0, l.Length);
+                BinaryPrimitives.WriteInt32LittleEndian(lenBuf, element.Length);
+                destination.WriteSpan(lenBuf);
                 destination.Write(element, 0, element.Length);
             }
         }
 
         public static void Encode(ReadOnlySpan<Guid> data, Stream destination) {
+            Span<byte> buf = stackalloc byte[16];
             foreach(Guid element in data) {
-                byte[] b = element.ToBigEndianByteArray();
-                destination.Write(b, 0, b.Length);
+                element.ToBigEndianByteArray(buf);
+                destination.WriteSpan(buf);
             }
         }
 
@@ -853,32 +857,34 @@ namespace Parquet.Encodings {
 
             switch(tse.Type) {
                 case TType.INT32:
+                    Span<byte> dtBuf32 = stackalloc byte[sizeof(int)];
                     foreach(DateTime element in data) {
                         int days = element.ToUnixDays();
-                        byte[] raw = BitConverter.GetBytes(days);
-                        destination.Write(raw, 0, raw.Length);
+                        BinaryPrimitives.WriteInt32LittleEndian(dtBuf32, days);
+                        destination.WriteSpan(dtBuf32);
                     }
                     break;
                 case TType.INT64:
+                    Span<byte> dtBuf64 = stackalloc byte[sizeof(long)];
                     if(tse.LogicalType?.TIMESTAMP is not null) {
                         bool adjustToUtc = tse.LogicalType.TIMESTAMP.IsAdjustedToUTC;
                         foreach(DateTime element in data) {
                             if(tse.LogicalType.TIMESTAMP.Unit.MILLIS is not null) {
                                 DateTime dt = adjustToUtc ? element.ToUtc() : element;
                                 long unixTime = dt.ToUnixMilliseconds();
-                                byte[] raw = BitConverter.GetBytes(unixTime);
-                                destination.Write(raw, 0, raw.Length);    
+                                BinaryPrimitives.WriteInt64LittleEndian(dtBuf64, unixTime);
+                                destination.WriteSpan(dtBuf64);
 #if NET7_0_OR_GREATER
                             } else if (tse.LogicalType.TIMESTAMP.Unit.MICROS is not null) {
                                 DateTime dt = adjustToUtc ? element.ToUtc() : element;
                                 long unixTime = dt.ToUnixMicroseconds();
-                                byte[] raw = BitConverter.GetBytes(unixTime);
-                                destination.Write(raw, 0, raw.Length);
+                                BinaryPrimitives.WriteInt64LittleEndian(dtBuf64, unixTime);
+                                destination.WriteSpan(dtBuf64);
                             } else if (tse.LogicalType.TIMESTAMP.Unit.NANOS is not null) {
                                 DateTime dt = adjustToUtc ? element.ToUtc() : element;
                                 long unixTime = dt.ToUnixNanoseconds();
-                                byte[] raw = BitConverter.GetBytes(unixTime);
-                                destination.Write(raw, 0, raw.Length);
+                                BinaryPrimitives.WriteInt64LittleEndian(dtBuf64, unixTime);
+                                destination.WriteSpan(dtBuf64);
 #endif
                             } else {
                                 throw new ParquetException($"Unexpected TimeUnit: {tse.LogicalType.TIMESTAMP.Unit}");
@@ -887,15 +893,15 @@ namespace Parquet.Encodings {
                     } else if(tse.ConvertedType == ConvertedType.TIMESTAMP_MILLIS) {
                         foreach(DateTime element in data) {
                             long unixTime = element.ToUtc().ToUnixMilliseconds();
-                            byte[] raw = BitConverter.GetBytes(unixTime);
-                            destination.Write(raw, 0, raw.Length);
+                            BinaryPrimitives.WriteInt64LittleEndian(dtBuf64, unixTime);
+                            destination.WriteSpan(dtBuf64);
                         }
 #if NET7_0_OR_GREATER
                     } else if(tse.ConvertedType == ConvertedType.TIMESTAMP_MICROS) {
                         foreach(DateTime element in data) {
                             long unixTime = element.ToUtc().ToUnixMicroseconds();
-                            byte[] raw = BitConverter.GetBytes(unixTime);
-                            destination.Write(raw, 0, raw.Length);
+                            BinaryPrimitives.WriteInt64LittleEndian(dtBuf64, unixTime);
+                            destination.WriteSpan(dtBuf64);
                         }
 #endif
                     } else {
@@ -916,26 +922,29 @@ namespace Parquet.Encodings {
 
 #if NET6_0_OR_GREATER
         public static void Encode(ReadOnlySpan<DateOnly> data, Stream destination, SchemaElement tse) {
+            Span<byte> buf = stackalloc byte[sizeof(int)];
             foreach(DateOnly element in data) {
                 int days = element.ToUnixDays();
-                byte[] raw = BitConverter.GetBytes(days);
-                destination.Write(raw, 0, raw.Length);
+                BinaryPrimitives.WriteInt32LittleEndian(buf, days);
+                destination.WriteSpan(buf);
             }
         }
         public static void Encode(ReadOnlySpan<TimeOnly> data, Stream destination, SchemaElement tse) {
             switch(tse.Type) {
                 case TType.INT32:
+                    Span<byte> toBuf32 = stackalloc byte[sizeof(int)];
                     foreach(TimeOnly element in data) {
                         int ticks = (int)(element.Ticks / TimeSpan.TicksPerMillisecond);
-                        byte[] raw = BitConverter.GetBytes(ticks);
-                        destination.Write(raw, 0, raw.Length);
+                        BinaryPrimitives.WriteInt32LittleEndian(toBuf32, ticks);
+                        destination.WriteSpan(toBuf32);
                     }
                     break;
                 case TType.INT64:
+                    Span<byte> toBuf64 = stackalloc byte[sizeof(long)];
                     foreach(TimeOnly element in data) {
                         long ticks = element.Ticks / 10;
-                        byte[] raw = BitConverter.GetBytes(ticks);
-                        destination.Write(raw, 0, raw.Length);
+                        BinaryPrimitives.WriteInt64LittleEndian(toBuf64, ticks);
+                        destination.WriteSpan(toBuf64);
                     }
                     break;
             }
@@ -1063,17 +1072,19 @@ namespace Parquet.Encodings {
         public static void Encode(ReadOnlySpan<TimeSpan> data, Stream destination, SchemaElement tse) {
             switch(tse.Type) {
                 case TType.INT32:
+                    Span<byte> tsBuf32 = stackalloc byte[sizeof(int)];
                     foreach(TimeSpan ts in data) {
                         int ms = (int)ts.TotalMilliseconds;
-                        byte[] raw = BitConverter.GetBytes(ms);
-                        destination.Write(raw, 0, raw.Length);
+                        BinaryPrimitives.WriteInt32LittleEndian(tsBuf32, ms);
+                        destination.WriteSpan(tsBuf32);
                     }
                     break;
                 case TType.INT64:
+                    Span<byte> tsBuf64 = stackalloc byte[sizeof(long)];
                     foreach(TimeSpan ts in data) {
                         long micros = ts.Ticks / 10;
-                        byte[] raw = BitConverter.GetBytes(micros);
-                        destination.Write(raw, 0, raw.Length);
+                        BinaryPrimitives.WriteInt64LittleEndian(tsBuf64, micros);
+                        destination.WriteSpan(tsBuf64);
                     }
                     break;
                 default:
@@ -1157,10 +1168,7 @@ namespace Parquet.Encodings {
                     }
 
                     // write our data
-                    if(len == 0)
-                        Array.Copy(ZeroInt32, 0, rb, rbOffset, ZeroInt32.Length);
-                    else
-                        Array.Copy(BitConverter.GetBytes(len), 0, rb, rbOffset, sizeof(int));
+                    BinaryPrimitives.WriteInt32LittleEndian(rb.AsSpan(rbOffset), len);
                     rbOffset += sizeof(int);
                     if(len > 0) {
                         E.GetBytes(s, 0, s.Length, rb, rbOffset);

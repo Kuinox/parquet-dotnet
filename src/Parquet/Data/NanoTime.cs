@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Parquet.Data; 
 
@@ -14,14 +16,8 @@ class NanoTime {
     }
 
     public NanoTime(Span<byte> span) {
-#if NETSTANDARD2_0
-        byte[] data = span.ToArray();
-        _timeOfDayNanos = BitConverter.ToInt64(data, 0);
-        _julianDay = BitConverter.ToInt32(data, sizeof(long));
-#else
-        _timeOfDayNanos = BitConverter.ToInt64(span.Slice(0, sizeof(long)));
-        _julianDay = BitConverter.ToInt32(span.Slice(sizeof(long)));
-#endif
+        _timeOfDayNanos = MemoryMarshal.Read<long>(span);
+        _julianDay = MemoryMarshal.Read<int>(span.Slice(sizeof(long)));
     }
 
     public NanoTime(DateTime dt) {
@@ -45,18 +41,20 @@ class NanoTime {
     }
 
     public void Write(Stream s) {
-        byte[] b1 = BitConverter.GetBytes(_timeOfDayNanos);
-        byte[] b2 = BitConverter.GetBytes(_julianDay);
-        s.Write(b1, 0, b1.Length);
-        s.Write(b2, 0, b2.Length);
+        Span<byte> buffer = stackalloc byte[BinarySize];
+        BinaryPrimitives.WriteInt64LittleEndian(buffer, _timeOfDayNanos);
+        BinaryPrimitives.WriteInt32LittleEndian(buffer.Slice(sizeof(long)), _julianDay);
+#if NETSTANDARD2_0
+        s.Write(buffer.ToArray(), 0, BinarySize);
+#else
+        s.Write(buffer);
+#endif
     }
 
     public byte[] GetBytes() {
-        byte[] b1 = BitConverter.GetBytes(_timeOfDayNanos);
-        byte[] b2 = BitConverter.GetBytes(_julianDay);
-        byte[] r = new byte[b1.Length+ b2.Length];
-        b1.CopyTo(r, 0);
-        b2.CopyTo(r, b1.Length);
+        byte[] r = new byte[BinarySize];
+        BinaryPrimitives.WriteInt64LittleEndian(r, _timeOfDayNanos);
+        BinaryPrimitives.WriteInt32LittleEndian(r.AsSpan(sizeof(long)), _julianDay);
         return r;
     }
 

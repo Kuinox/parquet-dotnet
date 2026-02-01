@@ -78,30 +78,19 @@ namespace Parquet.Encodings {
         /// <returns>Number of bytes written</returns>
         public static int Encode8Values<#= ed #>(Span<<#= nt #>> src, Span<byte> dest, int bitWidth) {
 
-            bool needsTempBuffer = dest.Length < bitWidth;
-            int written = bitWidth;
-
-            Span<<#= nt #>> src1;
-            Span<byte> dest1;
-            if(needsTempBuffer) {
-                src1 = new <#= nt #>[8];
+            if(dest.Length < bitWidth) {
+                Span<<#= nt #>> src1 = stackalloc <#= nt #>[8];
                 src.CopyTo(src1);
-                dest1 = new byte[bitWidth];
-                written = dest.Length;
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Pack8Values<#= ed #>(src1, dest1, bitWidth);
-
-            if(needsTempBuffer) {
+                Span<byte> dest1 = stackalloc byte[bitWidth];
+                Pack8Values<#= ed #>(src1, dest1, bitWidth);
                 for(int i = 0; i < bitWidth && i < dest.Length; i++) {
                     dest[i] = dest1[i];
                 }
+                return dest.Length;
+            } else {
+                Pack8Values<#= ed #>(src, dest, bitWidth);
+                return bitWidth;
             }
-
-            return written;
         }
     
 
@@ -122,30 +111,20 @@ namespace Parquet.Encodings {
         public static int Decode8Values<#= ed #>(Span<byte> src, Span<<#= nt #>> dest, int bitWidth) {
 
             // we always need at least bitWidth bytes available to decode 8 values
-            bool needsTempFuffer = src.Length < bitWidth || dest.Length < 8;
-            int decoded = 8;
-
-            Span<byte> src1;
-            Span<<#= nt #>> dest1;
-            if (needsTempFuffer) {
-                src1 = new byte[bitWidth];
+            if (src.Length < bitWidth || dest.Length < 8) {
+                Span<byte> src1 = stackalloc byte[bitWidth];
                 src.CopyTo(src1);
-                dest1 = new <#= nt #>[8];
-                decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
-            } else {
-                src1 = src;
-                dest1 = dest;
-            }
-
-            Unpack8Values<#= ed #>(src1, dest1, bitWidth);
-
-            if(needsTempFuffer) {
+                Span<<#= nt #>> dest1 = stackalloc <#= nt #>[8];
+                int decoded = Math.Min(src.Length * 8 / bitWidth, dest.Length);
+                Unpack8Values<#= ed #>(src1, dest1, bitWidth);
                 for(int i = 0; i < decoded; i++) {
                     dest[i] = dest1[i];
                 }
+                return decoded;
+            } else {
+                Unpack8Values<#= ed #>(src, dest, bitWidth);
+                return 8;
             }
-
-            return decoded;
         }
 
         /// <summary>

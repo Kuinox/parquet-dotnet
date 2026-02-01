@@ -23,6 +23,22 @@ namespace Parquet.Extensions {
 #endif
         }
 
+        public static void ToBigEndianByteArray(this Guid guid, Span<byte> destination) {
+#if NET8_0_OR_GREATER
+            guid.TryWriteBytes(destination, bigEndian: true, out _);
+#elif NETSTANDARD2_0
+            guid.ToBigEndianByteArray().CopyTo(destination);
+#else
+            guid.TryWriteBytes(destination);
+            if (BitConverter.IsLittleEndian) {
+                (destination[0], destination[3]) = (destination[3], destination[0]);
+                (destination[1], destination[2]) = (destination[2], destination[1]);
+                (destination[4], destination[5]) = (destination[5], destination[4]);
+                (destination[6], destination[7]) = (destination[7], destination[6]);
+            }
+#endif
+        }
+
         public static Guid ToGuidFromBigEndian(this ReadOnlySpan<byte> buffer) {
 #if NET8_0_OR_GREATER
             // .NET 8 has built-in support for big-endian encoding

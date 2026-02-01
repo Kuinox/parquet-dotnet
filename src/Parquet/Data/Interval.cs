@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 
 namespace Parquet.File.Values.Primitives; 
 
@@ -44,13 +45,10 @@ public struct Interval {
     /// </summary>
     /// <returns></returns>
     public byte[] GetBytes() {
-        byte[] m = BitConverter.GetBytes(Months);
-        byte[] d = BitConverter.GetBytes(Days);
-        byte[] ml = BitConverter.GetBytes(Millis);
-        byte[] r = new byte[12];
-        m.CopyTo(r, 0);
-        d.CopyTo(r, 4);
-        ml.CopyTo(r, 8);
+        byte[] r = new byte[BinarySize];
+        BinaryPrimitives.WriteInt32LittleEndian(r.AsSpan(0), Months);
+        BinaryPrimitives.WriteInt32LittleEndian(r.AsSpan(4), Days);
+        BinaryPrimitives.WriteInt32LittleEndian(r.AsSpan(8), Millis);
         return r;
     }
 
